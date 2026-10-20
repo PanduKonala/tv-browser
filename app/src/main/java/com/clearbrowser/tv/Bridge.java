@@ -10,8 +10,15 @@ final class Bridge {
         boolean holdPreviews();
         /** event: "playing" when a video starts, "time" every couple of seconds while it plays. */
         void onVideo(String event, double position);
+        /** A full-length video with sound started playing in some frame. */
+        /** src: the file the page's player is actually playing (blob: for MSE players). */
+        void onVideoStarted(double position, String subtitlesJson, String src);
         /** From the bookmarks page only (the host checks which page is showing). */
         void removeBookmark(String url);
+        /** From the home page only. */
+        void clearRecent();
+        /** The pointer rests on a link in the top page. */
+        void prefetch(String url);
     }
 
     private final Host host;
@@ -36,6 +43,27 @@ final class Bridge {
     @JavascriptInterface
     public void removeBookmark(String url) {
         host.removeBookmark(url);
+    }
+
+    @JavascriptInterface
+    public void clearRecent() {
+        host.clearRecent();
+    }
+
+    @JavascriptInterface
+    public void prefetch(String url) {
+        host.prefetch(url);
+    }
+
+    /** Periodic playback health from a frame with a playing video (logged as ClearVideo). */
+    @JavascriptInterface
+    public void videoStats(String json) {
+        android.util.Log.i("ClearVideo", json);
+    }
+
+    @JavascriptInterface
+    public void videoStarted(double position, String subtitlesJson, String src) {
+        host.onVideoStarted(position, subtitlesJson, src);
     }
 
     @JavascriptInterface

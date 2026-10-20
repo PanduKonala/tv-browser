@@ -1,8 +1,9 @@
 # Clear Browser
 
 A small, single-tab, ad-blocking web browser for Android TV, built on the system WebView so it
-stays light on 1 GB TVs. Remote-first: the D-pad drives a mouse pointer. Opens Google; searches
-go to Google; the Bookmarks button in the toolbar lists saved pages.
+stays light on 1 GB TVs. Remote-first: the D-pad drives a mouse pointer. Opens on its own home
+page (search, bookmarks, recently visited; instant, works offline); searches go to Google; the
+Bookmarks button in the toolbar jumps to the bookmarks.
 
 ## Blocking
 
@@ -19,16 +20,27 @@ go to Google; the Bookmarks button in the toolbar lists saved pages.
 
 ## Streaming
 
-- **TV player**: when a site's player goes fullscreen, the stream it was playing (HLS `.m3u8`,
+- **TV player, automatic**: when a page starts a real video (sound on, longer than 90 s or
+  live) and the browser has seen its stream, playback moves to the TV player by itself; muted
+  previews, short clips and YouTube stay in the page. Besides smoothness, this is how Dolby
+  audio plays: the in-page player can't decode E-AC-3/AC-3 (common in .mkv files) and stays
+  silent, while the TV player hands it to the TV's decoder. Measured on a 27-min 1080p .mkv:
+  in-page 16 stalls in 21 s, 10 % dropped frames, no sound; TV player 0 stalls, 0 dropped, E-AC-3 sound.
+- **TV player, on fullscreen**: when a site's player goes fullscreen, the stream it was playing (HLS `.m3u8`,
   DASH `.mpd`, or a video file) opens in a built-in ExoPlayer with the page's headers, cookies
   and position. Video goes straight to the TV's hardware video plane instead of being composited
   through WebView. Measured on the Bedroom TV, 1080p over 2 min: web player 4-9 stalls and 6-12 %
   dropped frames; TV player 0 stalls, 0 dropped. Back returns to the page at the same spot; if a
   stream won't play natively, the page's own player takes over. Toggle in ⋮.
+- **Subtitles** (TV player): tracks inside the video plus subtitle files the page used (scrubbing
+  thumbnail .vtt files are ignored; a subtitle file that fails is dropped without stopping playback).
+  **Menu**, a held **OK**, or the Captions key opens the panel: on/off, track, size (small to extra
+  large), style (white/yellow, outlined or on a dark box), position (bottom/raised). Choices carry over.
 - **Parallel downloads** (TV player): each segment is fetched as byte ranges over up to 32
   connections. Per host it starts at 8 and doubles after clean downloads; a failed piece is retried
   and halves the count (down to 1); servers without range support get one plain stream; at most
-  16 MB is in flight.
+  16 MB is in flight. A refused piece (403/416/429/503, i.e. rate limiting) switches the rest of
+  the download to one continuous connection from that byte, and the host stays single-stream.
 - **Quality**: capped at 1080p / 60 fps (both players); below that, whatever the site serves.
 - **RAM**: filter lists are memory-mapped from the APK (no heap); in-page hls.js players get a lean
   buffer (10 s behind, 20-40 s ahead) unless the site sets its own; Wi-Fi is kept out of power-save
@@ -36,8 +48,13 @@ go to Google; the Bookmarks button in the toolbar lists saved pages.
 
 ## Page speed and RAM
 
-- **Bigger disk cache**: WebView's HTTP cache raised from 20 MB to 256 MB (at most a third of free
-  storage), so repeat visits read pages, images and compiled scripts from storage, not RAM or network.
+- **Bigger disk cache**: WebView's HTTP cache raised from 20 MB toward 1 GB, always leaving 300 MB
+  of storage free (WebView itself caps it at 320 MB on these TVs). Repeat visits read pages, images
+  and compiled scripts from storage, not RAM or network.
+- **Back/forward cache**: Back shows the previous page from memory instead of reloading it
+  (1 page, 10 minutes, dropped by Chromium under memory pressure).
+- **Link prefetch**: when the pointer rests on a same-site link for 200 ms (or presses it), that
+  page's HTML is fetched into the cache. Pages' own speculation rules are enabled too.
 - **Learned preconnect** (Chrome's loading predictor): the servers each site uses are remembered,
   and connections to them (DNS + TLS) open in parallel as soon as you navigate there. On these TVs
   DNS-over-TLS lookups took up to 1.6 s each; with preconnect they mostly drop to 0.
@@ -50,6 +67,12 @@ go to Google; the Bookmarks button in the toolbar lists saved pages.
 
 Measured on the Bedroom TV, cold app start, first paint: YouTube 5.7-7.3 s -> 3.4 s,
 Crunchyroll 5.9 s -> 3.3 s (fully loaded 9.7 s -> 2.8 s).
+
+TCL "Memory Shrinker" (in the firmware's ActivityManager): a process that isn't the on-screen app
+is killed once it passes ~102 MB if it's backgrounded (adj > 700), or 200 MB at any priority
+below foreground. WebView's page renderer is a separate process, so leaving the browser with a
+heavy page open gets that page killed; it reloads when you come back. While the browser is on
+screen the renderer runs at foreground priority and is safe.
 
 Known limit: both TVs' low-memory killer (lmkd) fails to read /proc/zoneinfo ("parse error"), so
 idle apps are never reclaimed and the system lives in swap. That's TCL firmware; it needs root or a

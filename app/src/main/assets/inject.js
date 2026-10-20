@@ -170,6 +170,24 @@
     }, true);
   }
 
+  // Link prefetch: when the pointer rests on a link (or presses it), have the app fetch that
+  // page's HTML into the cache, so the click lands on a warm response. Same site only.
+  if (window.top === window && B.prefetch) {
+    var hoverTimer = 0, lastLink = '';
+    var linkOf = function (e) {
+      var a = e.target && e.target.closest && e.target.closest('a[href]');
+      if (!a || a.target === '_blank' || !/^https:/.test(a.href)) return '';
+      return a.href.split('#')[0] === location.href.split('#')[0] ? '' : a.href;
+    };
+    var go = function (h) { if (h && h !== lastLink) { lastLink = h; try { B.prefetch(h); } catch (x) {} } };
+    document.addEventListener('mouseover', function (e) {
+      var h = linkOf(e);
+      clearTimeout(hoverTimer);
+      if (h) hoverTimer = setTimeout(function () { go(h); }, 200);
+    }, true);
+    document.addEventListener('pointerdown', function (e) { go(linkOf(e)); }, true);
+  }
+
   // Element hiding. Site rules arrive at once; generic rules only for the ids/classes the page
   // actually uses, the way uBlock Origin does it, so a TV CPU never parses 13k unused rules.
   var S = S0;
@@ -215,10 +233,49 @@
   S.bridgeMs += performance.now() - t1; S.bridgeCalls++;
   add(siteCss);
 
+  // Playback health of in-page video, for the app's ClearVideo log: resolution, stalls (waiting
+  // after it had started), dropped frames, and how much is buffered ahead.
+  var vStalls = 0, vStallMs = 0, vStallAt = 0, vStarted = false;
+  document.addEventListener('playing', function (e) {
+    if (e.target.tagName !== 'VIDEO') return;
+    vStarted = true;
+    if (vStallAt) { vStallMs += Date.now() - vStallAt; vStallAt = 0; }
+  }, true);
+  document.addEventListener('waiting', function (e) {
+    if (e.target.tagName === 'VIDEO' && vStarted && !vStallAt) { vStalls++; vStallAt = Date.now(); }
+  }, true);
+  setInterval(function () {
+    var vs = document.getElementsByTagName('video'), v = null;
+    for (var i = 0; i < vs.length; i++) if (!vs[i].paused) { v = vs[i]; break; }
+    if (!v || !B.videoStats) return;
+    var q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : {};
+    var ahead = 0;
+    for (var j = 0; j < v.buffered.length; j++) if (v.buffered.start(j) <= v.currentTime + 0.5) ahead = v.buffered.end(j) - v.currentTime;
+    try {
+      B.videoStats(JSON.stringify({ pos: Math.round(v.currentTime), res: v.videoWidth + 'x' + v.videoHeight,
+        stalls: vStalls, stallMs: vStallMs + (vStallAt ? Date.now() - vStallAt : 0), dropped: q.droppedVideoFrames,
+        frames: q.totalVideoFrames, ahead: Math.round(ahead), mse: /^blob:/.test(v.currentSrc), fs: !!document.fullscreenElement }));
+    } catch (x) {}
+  }, 10000);
+
   // Tell the app where the page's video is, so the TV player can pick up at the same spot.
   var lastTime = 0;
   document.addEventListener('playing', function (e) {
-    if (e.target.tagName === 'VIDEO') try { B.video('playing', e.target.currentTime || 0); } catch (x) {}
+    var v = e.target;
+    if (v.tagName !== 'VIDEO') return;
+    try { B.video('playing', v.currentTime || 0); } catch (x) {}
+    // A real video (sound on, longer than a clip, or live) started: the app may move it to the TV player.
+    var d = v.duration;
+    if (!v.muted && v.volume > 0 && (!isFinite(d) || d > 90)) {
+      // Subtitle tracks the player declared (it may not have downloaded them yet).
+      var subs = [];
+      var ts = v.querySelectorAll('track[src]');
+      for (var i = 0; i < ts.length; i++) {
+        var k = ts[i].kind || 'subtitles';
+        if (k === 'subtitles' || k === 'captions') subs.push({ src: ts[i].src, label: ts[i].label || '', lang: ts[i].srclang || '' });
+      }
+      try { B.videoStarted(v.currentTime || 0, JSON.stringify(subs), v.currentSrc || ''); } catch (x) {}
+    }
   }, true);
   document.addEventListener('timeupdate', function (e) {
     var now = Date.now();

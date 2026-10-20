@@ -1,0 +1,178 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Home</title>
+<style>
+  :root {
+    --bg: #070a14; --bg2: #0d1326; --card: #121a30; --card-hi: #1a2442; --line: #233056;
+    --text: #e9edf7; --dim: #8c98b8; --faint: #5d6886; --accent: #6a96ff; --accent-2: #8f6bff; --danger: #ff6b7a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; color: var(--text); font-family: system-ui, Roboto, sans-serif; }
+  body {
+    background: radial-gradient(1200px 520px at 50% -160px, #1a2a5c 0%, transparent 70%),
+                radial-gradient(800px 400px at 100% 100%, #1b1440 0%, transparent 70%), var(--bg);
+    background-attachment: fixed;
+    padding: 28px 56px 72px;
+  }
+  header { display: flex; align-items: center; gap: 12px; }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; letter-spacing: .3px; }
+  .logo svg { width: 26px; height: 26px; }
+  .spacer { flex: 1; }
+  .chip { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px;
+    background: rgba(106,150,255,.10); border: 1px solid rgba(106,150,255,.25); color: var(--dim); font-size: 13px; }
+  .chip b { color: var(--text); font-weight: 600; }
+  .clock { text-align: right; margin-left: 18px; }
+  .clock .t { font-size: 26px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+  .clock .d { font-size: 12px; color: var(--dim); margin-top: 4px; }
+
+  .search { margin: 34px auto 10px; width: min(760px, 100%); }
+  .search form { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 20px; border-radius: 18px;
+    background: rgba(18,26,48,.85); border: 2px solid var(--line); box-shadow: 0 18px 50px rgba(0,0,0,.35); }
+  .search form:focus-within, .search form:hover { border-color: var(--accent); }
+  .search svg { width: 24px; height: 24px; flex: none; fill: var(--dim); }
+  .search input { flex: 1; min-width: 0; font-size: 20px; padding: 12px 0; border: 0; outline: 0; background: transparent; color: var(--text); }
+  .search input::placeholder { color: var(--faint); }
+  .search button { font-size: 17px; font-weight: 600; padding: 12px 26px; border-radius: 12px; border: 0; color: #fff;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+
+  section { margin-top: 28px; }
+  h2 { display: flex; align-items: baseline; gap: 12px; margin: 0 0 14px; font-size: 13px; font-weight: 700;
+    color: var(--dim); text-transform: uppercase; letter-spacing: 1.4px; }
+  h2 .n { color: var(--faint); font-weight: 600; }
+  h2 button { margin-left: auto; font: inherit; font-size: 12px; letter-spacing: 1px; color: var(--faint); background: none;
+    border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; }
+  h2 button:hover { color: var(--text); border-color: var(--danger); }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  .tile { position: relative; border-radius: 18px; background: var(--card); border: 2px solid transparent;
+    transition: transform .12s ease, border-color .12s ease, background .12s ease; }
+  .tile:hover { transform: translateY(-3px); border-color: var(--accent); background: var(--card-hi); }
+  .tile a { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px 12px 16px;
+    color: var(--text); text-decoration: none; text-align: center; }
+  .icon { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; overflow: hidden;
+    font-size: 24px; font-weight: 700; color: #fff; flex: none; }
+  .icon img { width: 40px; height: 40px; }
+  .tile b { font-size: 14px; font-weight: 600; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile .x { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border-radius: 14px; border: 0; padding: 0;
+    background: rgba(0,0,0,.35); color: var(--dim); font-size: 18px; line-height: 28px; opacity: 0; transition: opacity .12s; }
+  .tile:hover .x { opacity: 1; }
+  .tile .x:hover { background: var(--danger); color: #fff; }
+
+  .row { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .card { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 14px; background: var(--card);
+    border: 2px solid transparent; color: var(--text); text-decoration: none; min-width: 0; }
+  .card:hover { border-color: var(--accent); background: var(--card-hi); }
+  .card .icon { width: 40px; height: 40px; border-radius: 11px; font-size: 18px; }
+  .card .icon img { width: 28px; height: 28px; }
+  .card .m { min-width: 0; }
+  .card b { display: block; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card span { display: block; font-size: 12px; color: var(--dim); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .empty { grid-column: 1 / -1; color: var(--faint); font-size: 15px; line-height: 1.7; padding: 18px 20px; border-radius: 14px; border: 2px dashed var(--line); }
+  kbd { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; color: var(--text); font-family: inherit; }
+  footer { position: fixed; left: 0; right: 0; bottom: 0; padding: 14px; text-align: center; font-size: 13px; color: var(--faint);
+    background: linear-gradient(transparent, rgba(7,10,20,.92) 45%); }
+  .flash { animation: flash 1.2s ease 1; }
+  @keyframes flash { 0%, 60% { box-shadow: 0 0 0 3px var(--accent); border-radius: 18px; } 100% { box-shadow: none; } }
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo">
+      <svg viewBox="0 0 24 24"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6a96ff"/><stop offset="1" stop-color="#8f6bff"/></linearGradient></defs>
+        <path fill="url(#g)" d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+      Clear
+    </div>
+    <div class="spacer"></div>
+    <div class="chip"><b id="blocked">0</b> ads &amp; pop-ups blocked</div>
+    <div class="clock"><div class="t" id="time">--:--</div><div class="d" id="date"></div></div>
+  </header>
+
+  <div class="search">
+    <form id="f">
+      <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      <input id="q" placeholder="Search Google or type a web address" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button>Go</button>
+    </form>
+  </div>
+
+  <section id="bookmarks">
+    <h2>Bookmarks <span class="n" id="bn"></span></h2>
+    <div class="tiles" id="tiles"><div class="empty">No bookmarks yet. On any page, hold <kbd>OK</kbd> (or press <kbd>Menu</kbd>) and pick ☆ to save it here.</div></div>
+  </section>
+
+  <section id="recent-s">
+    <h2>Recently visited <button id="clear" hidden>Clear</button></h2>
+    <div class="row" id="recent"><div class="empty">Sites you open show up here.</div></div>
+  </section>
+
+  <footer>Arrows move the pointer · <kbd>OK</kbd> open · hold <kbd>OK</kbd> or <kbd>Menu</kbd> toolbar · <kbd>Back</kbd> go back</footer>
+<script>
+  function tick() {
+    var d = new Date();
+    document.getElementById('time').textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    document.getElementById('date').textContent = d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
+  }
+  tick(); setInterval(tick, 15000);
+
+  document.getElementById('f').onsubmit = function (e) {
+    e.preventDefault();
+    var v = document.getElementById('q').value.trim();
+    if (!v) return;
+    if (!/^[a-z]+:\/\//i.test(v)) v = (/^[^\s]+\.[^\s]{2,}$/.test(v) ? 'https://' + v : 'https://www.google.com/search?q=' + encodeURIComponent(v));
+    location.href = v;
+  };
+  document.getElementById('clear').onclick = function () { ClearBridge.clearRecent(); };
+
+  function host(u) { return u.replace(/^https?:\/\/(www\.)?/, '').split(/[/?#]/)[0]; }
+  function icon(b, cls) {
+    var d = document.createElement('div'); d.className = 'icon';
+    if (b.i) { var im = document.createElement('img'); im.src = b.i; im.alt = ''; d.appendChild(im); d.style.background = '#fff'; }
+    else {
+      var h = host(b.u), sum = 0;
+      for (var i = 0; i < h.length; i++) sum = (sum * 31 + h.charCodeAt(i)) % 360;
+      d.style.background = 'linear-gradient(135deg, hsl(' + sum + ',62%,52%), hsl(' + (sum + 40) % 360 + ',62%,40%))';
+      d.textContent = (h[0] || '?').toUpperCase();
+    }
+    return d;
+  }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; }
+
+  // Called by the app once the page has loaded, and again after a change.
+  function render(data) {
+    document.getElementById('blocked').textContent = data.blocked.toLocaleString();
+    var tiles = document.getElementById('tiles');
+    document.getElementById('bn').textContent = data.bookmarks.length ? data.bookmarks.length : '';
+    if (data.bookmarks.length) {
+      tiles.innerHTML = '';
+      data.bookmarks.forEach(function (b) {
+        var t = el('div', 'tile'), a = el('a');
+        a.href = b.u; a.appendChild(icon(b)); a.appendChild(el('b', '', b.t));
+        var x = el('button', 'x', '×'); x.title = 'Remove';
+        x.onclick = function (e) { e.preventDefault(); ClearBridge.removeBookmark(b.u); };
+        t.appendChild(a); t.appendChild(x); tiles.appendChild(t);
+      });
+    }
+    var row = document.getElementById('recent');
+    document.getElementById('clear').hidden = !data.recent.length;
+    if (data.recent.length) {
+      row.innerHTML = '';
+      data.recent.forEach(function (r) {
+        var a = el('a', 'card'); a.href = r.u;
+        var m = el('div', 'm'); m.appendChild(el('b', '', r.t)); m.appendChild(el('span', '', host(r.u)));
+        a.appendChild(icon(r)); a.appendChild(m); row.appendChild(a);
+      });
+    } else {
+      row.innerHTML = '<div class="empty">Sites you open show up here.</div>';
+    }
+    if (location.hash === '#bookmarks') {
+      var s = document.getElementById('bookmarks');
+      s.scrollIntoView({ block: 'start' }); s.classList.remove('flash'); void s.offsetWidth; s.classList.add('flash');
+    }
+  }
+</script>
+</body>
+</html>

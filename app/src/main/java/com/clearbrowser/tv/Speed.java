@@ -2,11 +2,16 @@ package com.clearbrowser.tv;
 
 import android.content.Context;
 import android.net.Uri;
+import android.os.CancellationSignal;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.StatFs;
 import android.util.Log;
 import android.webkit.WebView;
 
+import androidx.webkit.PrefetchException;
 import androidx.webkit.Profile;
+import androidx.webkit.WebViewOutcomeReceiver;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
@@ -37,10 +42,12 @@ import java.util.concurrent.Executors;
  *  - starting the page renderer while the app opens, before the first page is asked for.
  */
 @androidx.annotation.OptIn(markerClass = {Profile.ExperimentalPreconnect.class,
-        Profile.ExperimentalWarmUpRendererProcess.class})
+        Profile.ExperimentalWarmUpRendererProcess.class, Profile.ExperimentalUrlPrefetch.class})
 final class Speed {
     private static final String TAG = "ClearSpeed";
-    private static final long CACHE_MAX = 256L * 1024 * 1024;
+    /** Disk cache: up to 1 GB, but always leave this much storage free for the TV itself. */
+    private static final long CACHE_MAX = 1024L * 1024 * 1024, KEEP_FREE = 300L * 1024 * 1024,
+            CACHE_MIN = 64L * 1024 * 1024;
     private static final int ORIGINS_PER_SITE = 12, MAX_SITES = 300, MIN_SEEN = 2;
 
     private final File store;
@@ -55,7 +62,8 @@ final class Speed {
     private final Set<String> thisPage = new HashSet<>();
     private String thisSite = "";
     private Profile profile;
-    private boolean canPreconnect;
+    private boolean canPreconnect, canPrefetch;
+    private final java.util.LinkedHashSet<String> prefetched = new java.util.LinkedHashSet<>();
 
     Speed(Context ctx) {
         store = new File(ctx.getFilesDir(), "learned-origins.json");
@@ -70,22 +78,31 @@ final class Speed {
         }
         profile = WebViewCompat.getProfile(web);
         if (WebViewFeature.isFeatureSupported(WebViewFeature.HTTP_CACHE_MANAGER)) {
-            // Up to 256 MB, but never more than a third of the free space.
-            long free = new StatFs(ctx.getCacheDir().getPath()).getAvailableBytes();
-            long quota = Math.max(32L * 1024 * 1024, Math.min(CACHE_MAX, free / 3));
-            try {
-                profile.getHttpCache().setQuotaBytes(quota);
-                Log.i(TAG, "HTTP cache quota " + (profile.getHttpCache().getQuotaBytes() >> 20) + " MB (default "
-                        + (profile.getHttpCache().getDefaultQuotaBytes() >> 20) + " MB)");
-            } catch (RuntimeException e) {
-                Log.w(TAG, "HTTP cache quota not applied", e);
-            }
+            // What's free now plus what the cache already holds, minus the reserve, capped at 1 GB.
+            // Measuring the cache means walking its files, so do that off the UI thread.
+            final Profile p = profile;
+            final File cacheDir = ctx.getCacheDir();
+            final Handler ui = new Handler(Looper.getMainLooper());
+            bg.execute(() -> {
+                long free = new StatFs(cacheDir.getPath()).getAvailableBytes();
+                long quota = Math.max(CACHE_MIN, Math.min(CACHE_MAX, free + sizeOf(cacheDir) - KEEP_FREE));
+                ui.post(() -> {
+                    try {
+                        p.getHttpCache().setQuotaBytes(quota);
+                        Log.i(TAG, "HTTP cache quota " + (p.getHttpCache().getQuotaBytes() >> 20) + " MB (default "
+                                + (p.getHttpCache().getDefaultQuotaBytes() >> 20) + " MB, free " + (free >> 20) + " MB)");
+                    } catch (RuntimeException e) {
+                        Log.w(TAG, "HTTP cache quota not applied", e);
+                    }
+                });
+            });
         }
+        canPrefetch = WebViewFeature.isFeatureSupported(WebViewFeature.PROFILE_URL_PREFETCH);
         canPreconnect = WebViewFeature.isFeatureSupported(WebViewFeature.PRECONNECT);
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WARM_UP_RENDERER_PROCESS)) {
             try { profile.warmUpRendererProcess(); } catch (RuntimeException ignored) { }
         }
-        Log.i(TAG, "preconnect=" + canPreconnect + " warmup="
+        Log.i(TAG, "preconnect=" + canPreconnect + " prefetch=" + canPrefetch + " warmup="
                 + WebViewFeature.isFeatureSupported(WebViewFeature.WARM_UP_RENDERER_PROCESS));
     }
 
@@ -108,6 +125,34 @@ final class Speed {
                 try { InetAddress.getAllByName(Uri.parse(o).getHost()); } catch (Exception ignored) { }
             });
         }
+    }
+
+    /**
+     * The pointer is resting on (or pressing) a link: fetch its page into the cache now, so the
+     * click lands on a warm response. HTML only (WebView's prefetch), never scripts or images.
+     */
+    void prefetch(String url) {
+        if (!canPrefetch || profile == null || url == null || !url.startsWith("https://")) return;
+        synchronized (prefetched) {
+            if (!prefetched.add(url)) return;
+            if (prefetched.size() > 40) prefetched.remove(prefetched.iterator().next());
+        }
+        try {
+            profile.prefetchUrlAsync(url, new CancellationSignal(), bg, new WebViewOutcomeReceiver<Void, PrefetchException>() {
+                @Override public void onResult(Void v) { Log.i(TAG, "prefetched " + url); }
+                @Override public void onError(PrefetchException e) { Log.i(TAG, "prefetch skipped " + url + ": " + e.getMessage()); }
+            });
+        } catch (RuntimeException e) {
+            canPrefetch = false;
+        }
+    }
+
+    private static long sizeOf(File f) {
+        if (f.isFile()) return f.length();
+        long n = 0;
+        File[] kids = f.listFiles();
+        if (kids != null) for (File k : kids) n += sizeOf(k);
+        return n;
     }
 
     private List<String> predicted(String site) {

@@ -8,6 +8,7 @@ import androidx.annotation.Nullable;
 import androidx.media3.common.C;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DataSpec;
+import androidx.media3.datasource.HttpDataSource;
 import androidx.media3.datasource.TransferListener;
 
 import java.io.ByteArrayOutputStream;
@@ -30,12 +31,15 @@ import java.util.concurrent.Future;
  * reports to the player's bandwidth meter, so adaptive quality sees the combined speed.
  *
  * Connections per host adapt (start 8, double after each clean download, up to 32). Fallbacks:
- * a failed piece is retried and halves that host's count (32 -> 16 -> ... -> 1); a server that
- * ignores ranges gets one plain stream. At most 16 MB is in flight, so RAM stays bounded.
+ * a refused piece (403/416/429/503: rate limiting) switches the rest of the download to one
+ * continuous connection from that exact byte, and that host stays single-stream for the session;
+ * a first request that's refused gets one plain retry; a server that ignores ranges gets one plain
+ * stream. At most 16 MB is in flight, so RAM stays bounded.
  */
 @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
 final class ParallelHttpDataSource implements DataSource {
-    static final int CHUNK = 1024 * 1024;          // first piece, and the largest piece
+    static final int CHUNK = 1024 * 1024;          // first piece
+    static final int MAX_PIECE = 4 * 1024 * 1024;  // fewer, larger requests: kinder to rate limits
     static final int MIN_PIECE = 128 * 1024;
     static final int MAX_CONNECTIONS = 32, START_CONNECTIONS = 8;
     static final long MAX_IN_FLIGHT = 16L * 1024 * 1024;
@@ -48,6 +52,9 @@ final class ParallelHttpDataSource implements DataSource {
     });
     /** Connections to use per host, learnt as we go. */
     private static final ConcurrentHashMap<String, Integer> LIMITS = new ConcurrentHashMap<>();
+
+    /** Hosts that refused parallel pieces: plain single stream from now on. */
+    private static final java.util.Set<String> SINGLE = java.util.Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     private static int limit(String host) {
         Integer n = LIMITS.get(host);
@@ -107,6 +114,7 @@ final class ParallelHttpDataSource implements DataSource {
         start = dataSpec.position;
         host = dataSpec.uri.getHost() == null ? "" : dataSpec.uri.getHost();
         hadError = false;
+        if (SINGLE.contains(host)) return openSingle(dataSpec);
         // First piece in the foreground: it tells us the total size and whether ranges work.
         DataSource first = newUpstream();
         long want = dataSpec.length == C.LENGTH_UNSET ? CHUNK : Math.min(CHUNK, dataSpec.length);
@@ -117,6 +125,12 @@ final class ParallelHttpDataSource implements DataSource {
             headers = first.getResponseHeaders();
             total = totalFromContentRange(headers);
             firstBytes = total < 0 ? null : readAll(first);
+        } catch (HttpDataSource.InvalidResponseCodeException e) {
+            // Refused straight away (often rate limiting after earlier requests): one plain try.
+            Log.w("ClearDL", host + ": first piece refused (" + e.responseCode + "), trying one plain stream");
+            SINGLE.add(host);
+            try { first.close(); } catch (IOException ignored) { }
+            return openSingle(dataSpec);
         } finally {
             first.close();
         }
@@ -133,7 +147,7 @@ final class ParallelHttpDataSource implements DataSource {
         connections = limit(host);
         // Spread what's left over the connections, within [MIN_PIECE, CHUNK].
         long rest = Math.max(0, len - firstBytes.length);
-        piece = (int) Math.max(MIN_PIECE, Math.min(CHUNK, (rest + connections - 1) / Math.max(1, connections)));
+        piece = (int) Math.max(MIN_PIECE, Math.min(MAX_PIECE, (rest + connections - 1) / Math.max(1, connections)));
         count = 1 + (int) ((rest + piece - 1) / piece);
         if (count > 1) Log.i("ClearDL", host + ": " + len / 1024 + " KB in " + count + " pieces over "
                 + Math.min(connections, count - 1) + " connections (host limit " + connections + ")");
@@ -174,6 +188,10 @@ final class ParallelHttpDataSource implements DataSource {
                 byte[] b = readAll(d);
                 if (b.length == n) return b;
                 last = new IOException("short piece " + b.length + "/" + n);
+            } catch (HttpDataSource.InvalidResponseCodeException e) {
+                last = e;
+                int code = e.responseCode;
+                if (code == 403 || code == 416 || code == 429 || code == 503) { backOff(host); break; }
             } catch (IOException e) {
                 last = e;
             } finally {
@@ -202,8 +220,19 @@ final class ParallelHttpDataSource implements DataSource {
                 Thread.currentThread().interrupt();
                 throw new InterruptedIOException();
             } catch (ExecutionException e) {
+                // A piece was refused: carry on with one continuous connection from its first byte.
                 Throwable c = e.getCause();
-                throw c instanceof IOException ? (IOException) c : new IOException(c);
+                Log.w("ClearDL", host + ": switching to one connection at piece " + next + " (" + (c == null ? "?" : c.getMessage()) + ")");
+                SINGLE.add(host);
+                long from = offsetOf(next);
+                for (Future<byte[]> f : pieces) if (f != null) f.cancel(true);
+                pieces.clear();
+                cur = null;
+                count = 0;
+                single = newUpstream();
+                DataSpec rest = spec.length == C.LENGTH_UNSET ? spec.subrange(from) : spec.subrange(from, spec.length - from);
+                single.open(rest);
+                return single.read(buffer, offset, length);
             }
             curPos = 0;
             next++;
@@ -212,6 +241,13 @@ final class ParallelHttpDataSource implements DataSource {
         int n = Math.min(length, cur.length - curPos);
         System.arraycopy(cur, curPos, buffer, offset, n);
         curPos += n;
+        return n;
+    }
+
+    private long openSingle(DataSpec dataSpec) throws IOException {
+        single = newUpstream();
+        long n = single.open(dataSpec);
+        headers = single.getResponseHeaders();
         return n;
     }
 

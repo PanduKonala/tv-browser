@@ -36,6 +36,8 @@ import android.widget.ImageButton;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
+import androidx.webkit.BackForwardCacheSettings;
+import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
@@ -54,6 +56,8 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
+@androidx.annotation.OptIn(markerClass = {WebSettingsCompat.ExperimentalBackForwardCacheSettings.class,
+        WebSettingsCompat.ExperimentalSpeculativeLoading.class})
 public class MainActivity extends Activity implements CursorLayout.Listener {
     private static final String DESKTOP_UA =
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36";
@@ -94,10 +98,20 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         Stream(long at, String url, Bundle headers) { this.at = at; this.url = url; this.headers = headers; }
     }
     private final List<Stream> streams = Collections.synchronizedList(new ArrayList<>());
+    /** Subtitle files the page fetched or declared (url -> label/language), handed to the TV player. */
+    private final java.util.LinkedHashMap<String, Bundle> subtitles = new java.util.LinkedHashMap<>();
     private final Set<String> nativeFailed = Collections.synchronizedSet(new HashSet<>());
     private volatile long playingAt;
     private volatile double videoPos;
+    /** What the page's video element reports it is playing (exact for file players, blob: for MSE). */
+    private volatile String playingSrc;
+    /** Candidates tried for this video; a refused one moves on to the next before giving up. */
+    private int playerRetries;
     private volatile String userAgent = "";
+    /** When Back was pressed, to log how long the previous page took to come back (ClearNav). */
+    private long backAt;
+    /** When we last returned from the TV player, so a page that resumes playing doesn't bounce us straight back. */
+    private long backFromPlayerAt;
     private boolean centerDown, centerLong;
     private AlertDialog dialog;
     /** Keeps Wi-Fi out of power-save while the browser is open: power-save naps are a classic cause of video stalls. */
@@ -210,13 +224,44 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                 videoPos = position;
                 if ("playing".equals(event)) playingAt = SystemClock.elapsedRealtime();
             }
+            @Override public void onVideoStarted(double position, String subtitlesJson, String src) {
+                videoPos = position;
+                playingSrc = src;
+                try {
+                    org.json.JSONArray a = new org.json.JSONArray(subtitlesJson == null ? "[]" : subtitlesJson);
+                    for (int i = 0; i < a.length(); i++) {
+                        JSONObject o = a.getJSONObject(i);
+                        noteSubtitle(o.optString("src"), o.optString("label"), o.optString("lang"));
+                    }
+                } catch (JSONException ignored) { }
+                // Give the stream's own request a moment to be seen, then move it to the TV player:
+                // smooth 1080p and Dolby audio (which the in-page player can't decode).
+                ui.postDelayed(() -> {
+                    if (!prefs.tvPlayer() || customView != null || isFinishing()) return;
+                    if (SystemClock.elapsedRealtime() - backFromPlayerAt < 4000) return; // just came back
+                    if (playInTvPlayer()) notice("Playing in the TV player · Back returns to the page");
+                }, 700);
+            }
             @Override public void removeBookmark(String url) {
                 ui.post(() -> {
-                    // Any page can call the bridge, so only honour this from our own bookmarks page.
-                    if (!Prefs.BOOKMARKS_PAGE.equals(web.getUrl()) || url == null) return;
+                    // Any page can call the bridge, so only honour this from our own home page.
+                    if (!Prefs.isHome(web.getUrl()) || url == null) return;
                     if (prefs.isBookmarked(url)) prefs.toggleBookmark(url, null);
-                    renderStartPage();
+                    renderHome();
                     notice("Bookmark removed");
+                });
+            }
+            @Override public void clearRecent() {
+                ui.post(() -> {
+                    if (!Prefs.isHome(web.getUrl())) return;
+                    prefs.clearRecents();
+                    renderHome();
+                });
+            }
+            @Override public void prefetch(String url) {
+                ui.post(() -> {
+                    // Only links within the site being shown: a page can't use us to fetch elsewhere.
+                    if (shieldsOn && Blocker.sameSite(hostOf(url), topHost)) speed.prefetch(url);
                 });
             }
         }), "ClearBridge");
@@ -224,6 +269,25 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             WebViewCompat.addDocumentStartJavaScript(web, injectJs, Collections.singleton("*"));
         }
 
+        // Back/forward cache: Back shows the previous page straight from memory instead of
+        // reloading it (heavy pages took 5-10 s). Kept small for a 1 GB TV: 1 page, 10 minutes;
+        // Chromium also drops them by itself under memory pressure.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.BACK_FORWARD_CACHE)) {
+            WebSettingsCompat.setBackForwardCacheEnabled(s, true);
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.BACK_FORWARD_CACHE_SETTINGS)) {
+                try {
+                    BackForwardCacheSettings b = WebSettingsCompat.getBackForwardCacheSettings(s);
+                    b.setMaxPagesInCache(1);
+                    b.setTimeoutSeconds(600);
+                } catch (RuntimeException ignored) { }
+            }
+        }
+        // Let pages' own speculation rules (prefetch/prerender hints) work.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.SPECULATIVE_LOADING)) {
+            WebSettingsCompat.setSpeculativeLoadingStatus(s, WebSettingsCompat.SPECULATIVE_LOADING_PRERENDER_ENABLED);
+        }
+        Log.i("ClearSpeed", "bfcache=" + WebViewFeature.isFeatureSupported(WebViewFeature.BACK_FORWARD_CACHE)
+                + " speculative=" + WebViewFeature.isFeatureSupported(WebViewFeature.SPECULATIVE_LOADING));
         speed.setUp(this, web);
         web.setWebViewClient(new Client());
         web.setWebChromeClient(chrome);
@@ -288,6 +352,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             boolean block = shieldsOn && !Blocker.sameSite(host, topHost) && Blocker.get().isBlocked(host, prefs);
             filterNanos.addAndGet(System.nanoTime() - t0);
             requests.incrementAndGet();
+            if (Log.isLoggable("ClearReq", Log.DEBUG)) Log.d("ClearReq", (block ? "BLOCK " : "") + req.getMethod() + " " + req.getUrl());
             if (!block) {
                 speed.used(req.getUrl().getScheme(), host);
                 noteStream(req);
@@ -307,6 +372,9 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             speed.pageStarted(hostOf(url));
             pageBlocked.set(0);
             streams.clear();
+            playingSrc = null;
+            playerRetries = 0;
+            synchronized (subtitles) { subtitles.clear(); }
             filterNanos.set(0);
             requests.set(0);
             updateShield();
@@ -315,6 +383,10 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
 
         @Override
         public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
+            if (backAt > 0) {
+                Log.i("ClearNav", "back to " + hostOf(url) + " shown in " + (SystemClock.uptimeMillis() - backAt) + " ms");
+                backAt = 0;
+            }
             String host = hostOf(url);
             if (!Blocker.sameSite(host, topHost)) setTop(url); // same-document navigations in SPAs
             updateToolbarState();
@@ -324,7 +396,8 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         public void onPageFinished(WebView view, String url) {
             progress.setVisibility(View.GONE);
             updateToolbarState();
-            if (Prefs.BOOKMARKS_PAGE.equals(url)) renderStartPage();
+            if (Prefs.isHome(url)) renderHome();
+            else if (url != null && url.startsWith("http") && view.getTitle() != null) prefs.addRecent(url, view.getTitle());
             logPerf(url);
             // WebView too old for document-start scripts: inject after load instead (weaker, but works).
             if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
@@ -422,6 +495,17 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         }
 
         @Override
+        public void onReceivedIcon(WebView view, Bitmap icon) {
+            // Keep a small copy for the home page's tiles (works offline, no favicon service).
+            String host = hostOf(view.getUrl());
+            if (host.isEmpty() || icon == null) return;
+            Bitmap small = Bitmap.createScaledBitmap(icon, 64, 64, true);
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            small.compress(Bitmap.CompressFormat.PNG, 100, out);
+            prefs.putIcon(host, "data:image/png;base64," + android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP));
+        }
+
+        @Override
         public Bitmap getDefaultVideoPoster() {
             return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888); // no grey play-button placeholder
         }
@@ -475,6 +559,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             + "html:Math.round(n.responseEnd-n.responseStart||0),res:performance.getEntriesByType('resource').length,"
             + "nodes:document.getElementsByTagName('*').length,bridgeMs:Math.round(s.bridgeMs||0),bridgeCalls:s.bridgeCalls,"
             + "scanMs:Math.round(s.scanMs||0),scanned:s.scanned,appends:s.appends,cssKB:Math.round(s.cssKB||0),previewsHeld:s.previewsHeld,longMs:Math.round(s.longMs||0),longN:s.longN,lcp:Math.round(s.lcp||0),"
+            + "nrr:(function(r){if(!r)return null;var o=[];(function w(x){(x.reasons||[]).forEach(function(y){o.push(y.reason)});(x.children||[]).forEach(w)})(r);return o})(n.notRestoredReasons),"
             + "heapMB:performance.memory?Math.round(performance.memory.usedJSHeapSize/1048576):-1})})()";
 
     /** One log line per page: how fast it loaded and what our blocking cost it (logcat -s ClearPerf). */
@@ -494,8 +579,38 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         return ranged && (p.endsWith(".mp4") || p.endsWith(".webm") || p.endsWith(".mkv") || p.endsWith(".m4v"));
     }
 
+    private static final java.util.regex.Pattern SUB_PATH = java.util.regex.Pattern.compile("(?i).*\\.(vtt|srt|ass|ssa)$");
+    private static final java.util.regex.Pattern LANG = java.util.regex.Pattern.compile(
+            "(?i)(?:^|[^a-z])(en|eng|english|es|spa|spanish|fr|fre|fra|french|de|ger|deu|german|it|ita|italian|pt|por|portuguese|"
+            + "hi|hin|hindi|ta|tam|tamil|te|tel|telugu|ar|ara|arabic|ja|jpn|japanese|ko|kor|korean|zh|chi|zho|chinese|ru|rus|russian)(?:[^a-z]|$)");
+
+    /** A subtitle file (fetched by the page or declared as a track): keep it for the TV player. */
+    private void noteSubtitle(String url, String label, String lang) {
+        if (url == null || !url.startsWith("http")) return;
+        // Players also use .vtt files for scrubbing thumbnails; those aren't subtitles.
+        if (url.toLowerCase(Locale.US).matches(".*(thumb|sprite|storyboard|preview|seek|chapters).*")) return;
+        Uri u = Uri.parse(url);
+        String name = u.getLastPathSegment() == null ? "Subtitles" : Uri.decode(u.getLastPathSegment());
+        if (lang == null || lang.isEmpty()) {
+            java.util.regex.Matcher m = LANG.matcher(url.toLowerCase(Locale.US));
+            lang = m.find() ? m.group(1) : "";
+        }
+        Bundle b = new Bundle();
+        b.putString("url", url);
+        b.putString("label", label == null || label.isEmpty() ? name : label);
+        b.putString("lang", lang);
+        synchronized (subtitles) {
+            if (!subtitles.containsKey(url)) subtitles.put(url, b);
+            if (subtitles.size() > 20) subtitles.remove(subtitles.keySet().iterator().next());
+        }
+    }
+
     /** IO thread: remember stream manifests / video files with the headers the page sent for them. */
     private void noteStream(WebResourceRequest req) {
+        if (SUB_PATH.matcher(req.getUrl().getPath() == null ? "" : req.getUrl().getPath()).matches()) {
+            noteSubtitle(req.getUrl().toString(), null, null);
+            return;
+        }
         Map<String, String> h = req.getRequestHeaders();
         boolean ranged = h != null && (h.containsKey("Range") || h.containsKey("range"));
         if (!isStreamPath(req.getUrl().getPath(), ranged)) return;
@@ -511,6 +626,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             String cookie = CookieManager.getInstance().getCookie(url);
             if (cookie != null && !b.containsKey("Cookie")) b.putString("Cookie", cookie);
             streams.add(new Stream(SystemClock.elapsedRealtime(), url, b));
+            if (Log.isLoggable("ClearReq", Log.DEBUG)) Log.d("ClearReq", "stream " + url + " headers=" + h);
             if (streams.size() > 40) streams.remove(0);
         }
     }
@@ -520,6 +636,25 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
      * started (later ones are its per-quality playlists), else the first one on the page.
      */
     private Stream currentStream() {
+        String src = playingSrc;
+        if (src != null && src.startsWith("http") && !nativeFailed.contains(src)) {
+            // File players tell us exactly what they play. If its address redirected, the player is
+            // now fetching the final address from the same server: that's the newest request there.
+            String host = Uri.parse(src).getHost();
+            synchronized (streams) {
+                for (int i = streams.size() - 1; i >= 0; i--) {
+                    Stream s = streams.get(i);
+                    if (!nativeFailed.contains(s.url) && host != null && host.equals(Uri.parse(s.url).getHost())) return s;
+                }
+                for (Stream s : streams) if (s.url.equals(src)) return s;
+            }
+            Bundle b = new Bundle();
+            String page = web.getUrl();
+            if (page != null) b.putString("Referer", page);
+            String cookie = CookieManager.getInstance().getCookie(src);
+            if (cookie != null) b.putString("Cookie", cookie);
+            return new Stream(SystemClock.elapsedRealtime(), src, b);
+        }
         synchronized (streams) {
             long since = playingAt - 20_000;
             for (Stream s : streams) if (s.at >= since && !nativeFailed.contains(s.url)) return s;
@@ -537,6 +672,9 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                 .putExtra(PlayerActivity.EXTRA_HEADERS, s.headers)
                 .putExtra(PlayerActivity.EXTRA_UA, userAgent)
                 .putExtra(PlayerActivity.EXTRA_POS, videoPos);
+        synchronized (subtitles) {
+            i.putParcelableArrayListExtra(PlayerActivity.EXTRA_SUBS, new ArrayList<>(subtitles.values()));
+        }
         startActivityForResult(i, REQ_PLAYER);
         return true;
     }
@@ -544,7 +682,9 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     @Override
     protected void onActivityResult(int req, int result, Intent data) {
         super.onActivityResult(req, result, data);
-        if (req != REQ_PLAYER || data == null) return;
+        if (req != REQ_PLAYER) return;
+        backFromPlayerAt = SystemClock.elapsedRealtime();
+        if (data == null) return;
         if (result == RESULT_OK) {
             // Back from the TV player: leave the page's video paused at the same spot.
             double pos = data.getDoubleExtra(PlayerActivity.EXTRA_POS, -1);
@@ -552,6 +692,8 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         } else {
             String url = data.getStringExtra(PlayerActivity.EXTRA_URL);
             if (url != null) nativeFailed.add(url);
+            // Pages often probe several copies; if this one was refused, try the next before giving up.
+            if (playerRetries++ < 2 && playInTvPlayer()) return;
             media("'play'");
         }
     }
@@ -580,13 +722,23 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         return prefs.totalBlocked() + unsaved.get();
     }
 
-    private void renderStartPage() {
+    private void renderHome() {
         try {
             JSONObject o = new JSONObject();
-            o.put("bookmarks", prefs.bookmarks());
+            o.put("bookmarks", withIcons(prefs.bookmarks()));
+            o.put("recent", withIcons(prefs.recents()));
             o.put("blocked", totalBlocked());
             web.evaluateJavascript("render(" + o + ")", null);
         } catch (JSONException ignored) { }
+    }
+
+    private org.json.JSONArray withIcons(org.json.JSONArray list) throws JSONException {
+        for (int i = 0; i < list.length(); i++) {
+            JSONObject e = list.getJSONObject(i);
+            String icon = prefs.icon(hostOf(e.optString("u")));
+            if (icon != null) e.put("i", icon);
+        }
+        return list;
     }
 
     // ---------------------------------------------------------------- keys
@@ -634,7 +786,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             case KeyEvent.KEYCODE_BACK:
                 if (!down) {
                     if (customView != null) chrome.onHideCustomView();
-                    else if (web.canGoBack()) web.goBack();
+                    else if (web.canGoBack()) { backAt = SystemClock.uptimeMillis(); web.goBack(); }
                     else showToolbar();
                 }
                 return true;
@@ -694,14 +846,14 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     // ---------------------------------------------------------------- toolbar
 
     private void wireToolbar() {
-        findViewById(R.id.back).setOnClickListener(v -> { if (web.canGoBack()) web.goBack(); });
+        findViewById(R.id.back).setOnClickListener(v -> { if (web.canGoBack()) { backAt = SystemClock.uptimeMillis(); web.goBack(); } });
         findViewById(R.id.forward).setOnClickListener(v -> { if (web.canGoForward()) web.goForward(); });
         findViewById(R.id.reload).setOnClickListener(v -> { hideToolbar(); web.reload(); });
         findViewById(R.id.home).setOnClickListener(v -> load(prefs.home()));
-        findViewById(R.id.bookmarks).setOnClickListener(v -> load(Prefs.BOOKMARKS_PAGE));
+        findViewById(R.id.bookmarks).setOnClickListener(v -> load(Prefs.HOME_PAGE + "#bookmarks"));
         star.setOnClickListener(v -> {
             String url = web.getUrl();
-            if (url == null || url.equals(Prefs.BOOKMARKS_PAGE)) return;
+            if (url == null || Prefs.isHome(url)) return;
             boolean on = prefs.toggleBookmark(url, web.getTitle());
             notice(on ? "Bookmarked" : "Bookmark removed");
             updateToolbarState();
@@ -744,7 +896,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         cursor.stopMoving();
         updateToolbarState();
         String url = web.getUrl();
-        urlField.setText(url == null || url.equals(Prefs.BOOKMARKS_PAGE) ? "" : url);
+        urlField.setText(url == null || Prefs.isHome(url) ? "" : url);
         toolbar.setVisibility(View.VISIBLE);
         urlField.requestFocus();
     }
@@ -776,10 +928,10 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         boolean desktop = prefs.desktop();
         String[] items = {
                 "Set this page as home",
-                "Use Google as home",
+                "Use the Clear home page as home",
                 desktop ? "Desktop site: on  (switch to mobile)" : "Desktop site: off  (switch to desktop)",
                 site.isEmpty() ? "Ad blocking: on" : (shieldsOn ? "Turn ad blocking off for " : "Turn ad blocking on for ") + site,
-                prefs.tvPlayer() ? "Fullscreen video in TV player: on" : "Fullscreen video in TV player: off",
+                prefs.tvPlayer() ? "Videos play in the TV player: on" : "Videos play in the TV player: off",
                 prefs.autoplay() ? "Muted previews and trailers: play (uses more memory)" : "Muted previews and trailers: wait for a click (saves memory)",
                 "Play this page's video in the TV player",
                 "Forget allowed / blocked sites",
@@ -792,15 +944,15 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                     switch (which) {
                         case 0: {
                             String url = web.getUrl();
-                            if (url != null) { prefs.setHome(url); notice("Home set to " + (topHost.isEmpty() ? "Bookmarks" : topHost)); }
+                            if (url != null) { prefs.setHome(url); notice("Home set to " + (topHost.isEmpty() ? "the Clear home page" : topHost)); }
                             break;
                         }
-                        case 1: prefs.setHome(Prefs.GOOGLE); notice("Home is Google"); break;
+                        case 1: prefs.setHome(Prefs.HOME_PAGE); notice("Home is the Clear home page"); break;
                         case 2: prefs.setDesktop(!desktop); applyUserAgent(); hideToolbar(); web.reload(); break;
                         case 3: shield.performClick(); break;
                         case 4:
                             prefs.setTvPlayer(!prefs.tvPlayer());
-                            notice(prefs.tvPlayer() ? "Fullscreen videos open in the TV player" : "Fullscreen videos stay in the page");
+                            notice(prefs.tvPlayer() ? "Videos open in the TV player" : "Videos stay in the page");
                             break;
                         case 5:
                             prefs.setAutoplay(!prefs.autoplay());
@@ -815,6 +967,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                         case 8:
                             CookieManager.getInstance().removeAllCookies(null);
                             WebStorage.getInstance().deleteAllData();
+                            prefs.clearRecents();
                             speed.forget();
                             web.clearCache(true);
                             notice("Cookies and site data cleared");

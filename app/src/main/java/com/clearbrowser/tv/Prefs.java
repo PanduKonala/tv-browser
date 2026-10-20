@@ -13,10 +13,15 @@ import java.util.Set;
 
 /** Settings and per-site choices, kept in SharedPreferences. */
 final class Prefs {
-    static final String BOOKMARKS_PAGE = "file:///android_asset/bookmarks.html";
-    static final String GOOGLE = "https://www.google.com/";
+    /** The built-in home page: search, bookmarks, recently visited. Loads instantly, no network. */
+    static final String HOME_PAGE = "file:///android_asset/home.html";
+    private static final int MAX_RECENT = 12, MAX_ICONS = 60;
+
+    static boolean isHome(String url) { return url != null && url.startsWith(HOME_PAGE); }
 
     private final SharedPreferences sp;
+    /** Site icons as small PNG data URIs, by host, so the home page shows them offline. */
+    private final SharedPreferences icons;
     // Read on WebView IO threads, so keep immutable snapshots and swap them on change.
     private volatile Set<String> userBlocked;
     private volatile Set<String> allowedPopups;
@@ -24,6 +29,7 @@ final class Prefs {
 
     Prefs(Context ctx) {
         sp = ctx.getSharedPreferences("clear", Context.MODE_PRIVATE);
+        icons = ctx.getSharedPreferences("icons", Context.MODE_PRIVATE);
         userBlocked = load("user_blocked");
         allowedPopups = load("allowed_popups");
         shieldsOff = load("shields_off");
@@ -40,8 +46,22 @@ final class Prefs {
         return Collections.unmodifiableSet(next);
     }
 
-    String home() { return sp.getString("home", GOOGLE); }
+    String home() { return sp.getString("home", HOME_PAGE); }
     void setHome(String url) { sp.edit().putString("home", url).apply(); }
+
+    /** Subtitle choice carried to the next video: a language code, "off", or "" (player default). */
+    String subtitleLanguage() { return sp.getString("sub_lang", ""); }
+    void setSubtitleLanguage(String lang) { sp.edit().putString("sub_lang", lang).apply(); }
+    /** 0 small, 1 medium, 2 large, 3 extra large. */
+    int subtitleSize() { return sp.getInt("sub_size", 2); }
+    void setSubtitleSize(int s) { sp.edit().putInt("sub_size", s).apply(); }
+
+    /** 0 white + outline, 1 yellow + outline, 2 white on dark box, 3 yellow on dark box. */
+    int subtitleStyle() { return sp.getInt("sub_style", 0); }
+    void setSubtitleStyle(int s) { sp.edit().putInt("sub_style", s).apply(); }
+    /** 0 bottom, 1 raised. */
+    int subtitlePosition() { return sp.getInt("sub_pos", 0); }
+    void setSubtitlePosition(int p) { sp.edit().putInt("sub_pos", p).apply(); }
 
     boolean autoplay() { return sp.getBoolean("autoplay", false); }
     void setAutoplay(boolean on) { sp.edit().putBoolean("autoplay", on).apply(); }
@@ -71,6 +91,34 @@ final class Prefs {
         sp.edit().remove("user_blocked").remove("allowed_popups").remove("shields_off").apply();
         userBlocked = allowedPopups = shieldsOff = Collections.emptySet();
         Blocker.get().userListChanged();
+    }
+
+    JSONArray recents() {
+        try { return new JSONArray(sp.getString("recent", "[]")); }
+        catch (JSONException e) { return new JSONArray(); }
+    }
+
+    /** Newest first, one entry per address. */
+    void addRecent(String url, String title) {
+        JSONArray old = recents(), next = new JSONArray();
+        try { next.put(new JSONObject().put("u", url).put("t", title == null || title.isEmpty() ? url : title)); }
+        catch (JSONException ignored) { }
+        for (int i = 0; i < old.length() && next.length() < MAX_RECENT; i++) {
+            JSONObject o = old.optJSONObject(i);
+            if (o != null && !url.equals(o.optString("u"))) next.put(o);
+        }
+        sp.edit().putString("recent", next.toString()).apply();
+    }
+
+    void clearRecents() { sp.edit().remove("recent").apply(); }
+
+    String icon(String host) { return host == null ? null : icons.getString(host, null); }
+
+    void putIcon(String host, String dataUri) {
+        if (host == null || host.isEmpty()) return;
+        SharedPreferences.Editor e = icons.edit().putString(host, dataUri);
+        if (icons.getAll().size() >= MAX_ICONS) e.clear().putString(host, dataUri); // simple cap: start over
+        e.apply();
     }
 
     JSONArray bookmarks() {
