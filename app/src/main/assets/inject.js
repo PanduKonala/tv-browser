@@ -149,6 +149,18 @@
   var B = window.ClearBridge;
   if (!B) return;
 
+  // Lighter rendering for TV GPUs: frosted-glass blur (backdrop-filter) is recomputed for every
+  // scroll frame and is the biggest single cost on these chips. Without it, translucent bars stay
+  // translucent, just not blurred.
+  var lite = true;
+  try { lite = B.liteEffects(); } catch (e) {}
+  if (lite) {
+    var ls = document.createElement('style');
+    ls.textContent = '*,*::before,*::after{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}';
+    (document.head || document.documentElement).appendChild(ls);
+    document.addEventListener('DOMContentLoaded', function () { if (!ls.isConnected) (document.head || document.documentElement).appendChild(ls); });
+  }
+
   // Muted autoplay is how sites run previews and hero trailers while you're only browsing; each
   // one decodes video and holds GPU memory (about 16 MB on one Netflix-style page here). Hold
   // those back until the first click on the page. Videos with sound, and anything after a click,

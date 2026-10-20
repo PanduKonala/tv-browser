@@ -10,6 +10,8 @@ final class Bridge {
         boolean holdPreviews();
         /** Test logging on (page timing, video stats): see Debug. */
         boolean debug();
+        /** Drop GPU-heavy effects (frosted-glass blur) for smoother scrolling. */
+        boolean liteEffects();
         /** event: "playing" when a video starts, "time" every couple of seconds while it plays. */
         void onVideo(String event, double position);
         /** A full-length video with sound started playing in some frame. */
@@ -35,6 +37,11 @@ final class Bridge {
     @JavascriptInterface
     public String generic(String tokens) {
         return host.shieldsOn() ? Blocker.get().cssForTokens(tokens) : "";
+    }
+
+    @JavascriptInterface
+    public boolean liteEffects() {
+        return host.liteEffects();
     }
 
     @JavascriptInterface

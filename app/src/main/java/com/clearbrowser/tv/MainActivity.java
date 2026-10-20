@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
@@ -110,6 +111,14 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     private volatile String userAgent = "";
     /** When Back was pressed, to log how long the previous page took to come back (ClearNav). */
     private long backAt;
+    private final android.content.BroadcastReceiver testHold = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(android.content.Context c, Intent i) {
+            String d = String.valueOf(i.getStringExtra("dir"));
+            int key = d.equals("up") ? KeyEvent.KEYCODE_DPAD_UP : d.equals("left") ? KeyEvent.KEYCODE_DPAD_LEFT
+                    : d.equals("right") ? KeyEvent.KEYCODE_DPAD_RIGHT : KeyEvent.KEYCODE_DPAD_DOWN;
+            cursor.testHold(key, i.getIntExtra("ms", 3000));
+        }
+    };
     private boolean resumed;
     /** When we last returned from the TV player, so a page that resumes playing doesn't bounce us straight back. */
     private long backFromPlayerAt;
@@ -167,6 +176,12 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         web.resumeTimers();
         if (wifiLock != null) wifiLock.acquire();
         resumed = true;
+        if (Debug.ON) {
+            // adb shell am broadcast -a com.clearbrowser.tv.TEST_HOLD --es dir down --ei ms 6000
+            IntentFilter f = new IntentFilter("com.clearbrowser.tv.TEST_HOLD");
+            if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(testHold, f, RECEIVER_EXPORTED);
+            else registerReceiver(testHold, f);
+        }
         // Fresh block lists when due, a little after opening, and never while a video is playing
         // in the TV player (this activity is paused then).
         ui.postDelayed(() -> {
@@ -177,6 +192,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     @Override
     protected void onPause() {
         resumed = false;
+        if (Debug.ON) try { unregisterReceiver(testHold); } catch (IllegalArgumentException ignored) { }
         web.onPause();
         web.pauseTimers();
         if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
@@ -245,6 +261,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             @Override public boolean shieldsOn() { return shieldsOn; }
             @Override public boolean holdPreviews() { return !prefs.autoplay(); }
             @Override public boolean debug() { return Debug.ON; }
+            @Override public boolean liteEffects() { return prefs.liteEffects(); }
             @Override public void onVideo(String event, double position) {
                 videoPos = position;
                 if ("playing".equals(event)) playingAt = SystemClock.elapsedRealtime();
@@ -854,17 +871,13 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     }
 
     @Override
-    public void onEdgeScroll(int dx, int dy) {
-        if (customView != null) return;
-        scrollPage(dx / (float) cursor.getWidth(), dy / (float) cursor.getHeight());
+    public boolean canScroll() {
+        return customView == null;
     }
 
+    /** Channel up/down: a quick swipe of about {@code fdy} screens (negative scrolls up). */
     private void scrollPage(float fdx, float fdy) {
-        float fx = cursor.cursorX() / cursor.getWidth(), fy = cursor.cursorY() / cursor.getHeight();
-        String js = String.format(Locale.US, "window.__clearScroll?__clearScroll(%.4f,%.4f,%.4f,%.4f):false",
-                fx, fy, fdx, fdy);
-        int px = (int) (fdx * cursor.getWidth()), py = (int) (fdy * cursor.getHeight());
-        web.evaluateJavascript(js, r -> { if (!"true".equals(r)) web.scrollBy(px, py); });
+        if (customView == null) cursor.swipe(fdy);
     }
 
     // ---------------------------------------------------------------- toolbar
@@ -962,6 +975,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                 "Clear cookies and site data",
                 "Update ad-block lists now  (last: " + (prefs.filtersUpdated() == 0 ? "built in"
                         : android.text.format.DateFormat.getMediumDateFormat(this).format(new java.util.Date(prefs.filtersUpdated()))) + ")",
+                prefs.liteEffects() ? "Smooth scrolling (skip blur effects): on" : "Smooth scrolling (skip blur effects): off",
                 "Exit",
         };
         dialog = new AlertDialog.Builder(this)
@@ -1003,7 +1017,13 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                             FilterUpdater.run(this, prefs, true, (ok, msg) ->
                                     notice(ok ? "Ad-block lists updated · " + msg : "Update failed, keeping current lists"));
                             break;
-                        case 10: finishAndRemoveTask(); break;
+                        case 10:
+                            prefs.setLiteEffects(!prefs.liteEffects());
+                            notice(prefs.liteEffects() ? "Smooth scrolling on" : "Sites keep their blur effects");
+                            hideToolbar();
+                            web.reload();
+                            break;
+                        case 11: finishAndRemoveTask(); break;
                     }
                 })
                 .show();

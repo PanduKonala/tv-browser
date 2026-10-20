@@ -76,6 +76,10 @@ final class Prefs {
     void setFiltersNextUpdate(long t) { sp.edit().putLong("filters_next", t).apply(); }
     void setFiltersUpdated(long when, long next) { sp.edit().putLong("filters_updated", when).putLong("filters_next", next).apply(); }
 
+    /** Smoother scrolling: skip frosted-glass blur effects the TV's GPU can't afford. */
+    boolean liteEffects() { return sp.getBoolean("lite_effects", true); }
+    void setLiteEffects(boolean on) { sp.edit().putBoolean("lite_effects", on).apply(); }
+
     boolean autoplay() { return sp.getBoolean("autoplay", false); }
     void setAutoplay(boolean on) { sp.edit().putBoolean("autoplay", on).apply(); }
 

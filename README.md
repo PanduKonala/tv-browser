@@ -95,6 +95,15 @@ Off by default. `adb shell setprop log.tag.Clear DEBUG` and restart the app to g
 and blocker cost (`ClearPerf`), per-request blocks (`ClearBlock`), in-page video stats
 (`ClearVideo`), TV player stats and tunneling state (`ClearPlayer`) and downloader decisions (`ClearDL`).
 
+## Smooth scrolling
+
+Pushing the pointer into the top or bottom edge drags the page with a virtual finger, so Chromium
+scrolls it on its compositor thread (smooth even while the site's scripts are busy) and scrolls
+whatever box is under the pointer; letting go stops without a fling. Hover events pause while
+scrolling. Frosted-glass blur (`backdrop-filter`) is switched off on pages because these GPUs
+recompute it every frame (⋮ → "Smooth scrolling" to keep it). Measured on 1shows.org, 12 s of
+held scrolling: before ~4 fps (47 frames, all late); after ~60 fps (773 frames, median 12 ms, 18 late).
+
 ## Remote
 
 | Key | Action |
@@ -104,7 +113,7 @@ and blocker cost (`ClearPerf`), per-request blocks (`ClearBlock`), in-page video
 | Hold OK / Menu | toolbar (back, forward, reload, home, address, bookmark, shield, ⋮) |
 | Back | leave fullscreen → go back → toolbar |
 | Play/Pause, FF/Rew | control the page's video (top-level players) |
-| Channel ± | page up / down |
+| Channel ± | smooth page up / down |
 
 ⋮ has: set this page as home / Google as home, desktop/mobile site, ad blocking per site, TV
 player on/off, play this page's video in the TV player, forget site choices, clear cookies.
