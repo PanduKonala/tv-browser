@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#070A14">
+
+    <com.clearbrowser.tv.CursorLayout
+        android:id="@+id/cursor"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <FrameLayout
+            android:id="@+id/fullscreen"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@android:color/black"
+            android:visibility="gone" />
+    </com.clearbrowser.tv.CursorLayout>
+
+    <ProgressBar
+        android:id="@+id/progress"
+        style="@android:style/Widget.Material.ProgressBar.Horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:layout_gravity="top"
+        android:max="100"
+        android:progressTint="#5B8CFF"
+        android:progressBackgroundTint="#00000000"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:background="@drawable/bar_bg"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="20dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="12dp"
+        android:visibility="gone">
+
+        <ImageButton android:id="@+id/back" style="@style/BarButton" android:src="@drawable/ic_back" android:contentDescription="Back" />
+        <ImageButton android:id="@+id/forward" style="@style/BarButton" android:src="@drawable/ic_forward" android:contentDescription="Forward" />
+        <ImageButton android:id="@+id/reload" style="@style/BarButton" android:src="@drawable/ic_reload" android:contentDescription="Reload" />
+        <ImageButton android:id="@+id/home" style="@style/BarButton" android:src="@drawable/ic_home" android:contentDescription="Home" />
+
+        <EditText
+            android:id="@+id/url"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="10dp"
+            android:layout_marginEnd="10dp"
+            android:layout_weight="1"
+            android:background="@drawable/url_bg"
+            android:hint="Search Google or type a web address"
+            android:imeOptions="actionGo|flagNoExtractUi|flagNoFullscreen"
+            android:inputType="textUri"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
+            android:selectAllOnFocus="true"
+            android:singleLine="true"
+            android:textColor="#E8ECF6"
+            android:textColorHint="#6F7A96"
+            android:textSize="16sp" />
+
+        <ImageButton android:id="@+id/star" style="@style/BarButton" android:src="@drawable/ic_star_border" android:contentDescription="Bookmark this page" />
+        <ImageButton android:id="@+id/bookmarks" style="@style/BarButton" android:src="@drawable/ic_bookmarks" android:contentDescription="Bookmarks" />
+
+        <TextView
+            android:id="@+id/shield"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:layout_marginStart="4dp"
+            android:background="@drawable/btn_bg"
+            android:drawableStart="@drawable/ic_shield"
+            android:drawablePadding="6dp"
+            android:drawableTint="@color/btn_fg"
+            android:focusable="true"
+            android:clickable="true"
+            android:gravity="center_vertical"
+            android:minWidth="64dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="14dp"
+            android:text="0"
+            android:textColor="@color/btn_fg"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <ImageButton android:id="@+id/menu" style="@style/BarButton" android:src="@drawable/ic_more" android:contentDescription="Menu" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/notice"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="20dp"
+        android:layout_marginEnd="24dp"
+        android:background="@drawable/notice_bg"
+        android:drawableStart="@drawable/ic_shield"
+        android:drawablePadding="8dp"
+        android:drawableTint="#5B8CFF"
+        android:gravity="center_vertical"
+        android:maxWidth="520dp"
+        android:paddingStart="14dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="8dp"
+        android:singleLine="true"
+        android:ellipsize="middle"
+        android:textColor="#E8ECF6"
+        android:textSize="14sp"
+        android:visibility="gone" />
+</FrameLayout>

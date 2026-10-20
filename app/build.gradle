@@ -1,0 +1,47 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.clearbrowser.tv'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.clearbrowser.tv'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // Sideloaded over ADB, never published: the debug key is enough.
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    androidResources {
+        // Filter lists are memory-mapped straight from the APK, which needs them stored uncompressed.
+        noCompress 'txt', 'tsv'
+    }
+}
+
+dependencies {
+    // addDocumentStartJavaScript: our blocker script runs before any page script.
+    implementation 'androidx.webkit:webkit:1.17.1'
+    // Native TV player: streams found on a page play here on the hardware video path instead of
+    // being composited through WebView (which stalls these TVs at 1080p).
+    implementation 'androidx.media3:media3-exoplayer:1.4.1'
+    implementation 'androidx.media3:media3-exoplayer-hls:1.4.1'
+    implementation 'androidx.media3:media3-exoplayer-dash:1.4.1'
+    implementation 'androidx.media3:media3-ui:1.4.1'
+}
