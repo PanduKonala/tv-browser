@@ -110,6 +110,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     private volatile String userAgent = "";
     /** When Back was pressed, to log how long the previous page took to come back (ClearNav). */
     private long backAt;
+    private boolean resumed;
     /** When we last returned from the TV player, so a page that resumes playing doesn't bounce us straight back. */
     private long backFromPlayerAt;
     private boolean centerDown, centerLong;
@@ -165,10 +166,17 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         web.onResume();
         web.resumeTimers();
         if (wifiLock != null) wifiLock.acquire();
+        resumed = true;
+        // Fresh block lists when due, a little after opening, and never while a video is playing
+        // in the TV player (this activity is paused then).
+        ui.postDelayed(() -> {
+            if (resumed && FilterUpdater.due(prefs)) FilterUpdater.run(this, prefs, false, null);
+        }, 30_000);
     }
 
     @Override
     protected void onPause() {
+        resumed = false;
         web.onPause();
         web.pauseTimers();
         if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
@@ -180,8 +188,24 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
 
     @Override
     protected void onDestroy() {
-        web.destroy();
+        tearDown(web);
+        web = null;
         super.onDestroy();
+    }
+
+    /**
+     * Android's recommended WebView teardown: detach, stop, drop history and the JS bridge, then
+     * destroy, so no Activity reference or native page state is kept alive afterwards.
+     */
+    private void tearDown(WebView w) {
+        if (w == null) return;
+        if (w.getParent() instanceof ViewGroup) ((ViewGroup) w.getParent()).removeView(w);
+        w.stopLoading();
+        w.setWebChromeClient(null);
+        w.setWebViewClient(new WebViewClient());
+        w.removeJavascriptInterface("ClearBridge");
+        w.clearHistory();
+        w.destroy();
     }
 
     // ---------------------------------------------------------------- WebView
@@ -220,6 +244,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         web.addJavascriptInterface(new Bridge(new Bridge.Host() {
             @Override public boolean shieldsOn() { return shieldsOn; }
             @Override public boolean holdPreviews() { return !prefs.autoplay(); }
+            @Override public boolean debug() { return Debug.ON; }
             @Override public void onVideo(String event, double position) {
                 videoPos = position;
                 if ("playing".equals(event)) playingAt = SystemClock.elapsedRealtime();
@@ -352,14 +377,14 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             boolean block = shieldsOn && !Blocker.sameSite(host, topHost) && Blocker.get().isBlocked(host, prefs);
             filterNanos.addAndGet(System.nanoTime() - t0);
             requests.incrementAndGet();
-            if (Log.isLoggable("ClearReq", Log.DEBUG)) Log.d("ClearReq", (block ? "BLOCK " : "") + req.getMethod() + " " + req.getUrl());
+            if (Debug.ON) Log.d("ClearReq", (block ? "BLOCK " : "") + req.getMethod() + " " + req.getUrl());
             if (!block) {
                 speed.used(req.getUrl().getScheme(), host);
                 noteStream(req);
                 return null;
             }
             unsaved.incrementAndGet();
-            Log.i("ClearBlock", "request " + host);
+            if (Debug.ON) Log.i("ClearBlock", "request " + host);
             if (pageBlocked.incrementAndGet() % 4 == 1) ui.post(MainActivity.this::updateShield);
             // No body stream: WebView fails the request like a network error, as uBlock/Brave do,
             // so the page's ad code sees "blocked" rather than an empty file it might retry.
@@ -384,7 +409,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         @Override
         public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
             if (backAt > 0) {
-                Log.i("ClearNav", "back to " + hostOf(url) + " shown in " + (SystemClock.uptimeMillis() - backAt) + " ms");
+                if (Debug.ON) Log.i("ClearNav", "back to " + hostOf(url) + " shown in " + (SystemClock.uptimeMillis() - backAt) + " ms");
                 backAt = 0;
             }
             String host = hostOf(url);
@@ -409,8 +434,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
             // The page's renderer crashed or was killed for memory (1 GB TVs): rebuild rather than die.
             String url = view.getUrl();
-            cursor.removeView(view);
-            view.destroy();
+            tearDown(view);
             createWebView();
             load(url != null ? url : prefs.home());
             notice("Page crashed and was reloaded");
@@ -564,7 +588,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
 
     /** One log line per page: how fast it loaded and what our blocking cost it (logcat -s ClearPerf). */
     private void logPerf(String url) {
-        if (url == null || !url.startsWith("http")) return;
+        if (!Debug.ON || url == null || !url.startsWith("http")) return;
         ui.postDelayed(() -> {
             if (!url.equals(web.getUrl())) return;
             web.evaluateJavascript(PERF_JS, r -> Log.i("ClearPerf", hostOf(url) + " " + r + " filterMs="
@@ -626,7 +650,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             String cookie = CookieManager.getInstance().getCookie(url);
             if (cookie != null && !b.containsKey("Cookie")) b.putString("Cookie", cookie);
             streams.add(new Stream(SystemClock.elapsedRealtime(), url, b));
-            if (Log.isLoggable("ClearReq", Log.DEBUG)) Log.d("ClearReq", "stream " + url + " headers=" + h);
+            if (Debug.ON) Log.d("ClearReq", "stream " + url + " headers=" + h);
             if (streams.size() > 40) streams.remove(0);
         }
     }
@@ -713,7 +737,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     private void blocked(String what, String target) {
         pageBlocked.incrementAndGet();
         unsaved.incrementAndGet();
-        Log.i("ClearBlock", what + " " + target);
+        if (Debug.ON) Log.i("ClearBlock", what + " " + target);
         updateShield();
         notice("Blocked " + what + (target == null ? "" : " · " + target));
     }
@@ -936,6 +960,8 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                 "Play this page's video in the TV player",
                 "Forget allowed / blocked sites",
                 "Clear cookies and site data",
+                "Update ad-block lists now  (last: " + (prefs.filtersUpdated() == 0 ? "built in"
+                        : android.text.format.DateFormat.getMediumDateFormat(this).format(new java.util.Date(prefs.filtersUpdated()))) + ")",
                 "Exit",
         };
         dialog = new AlertDialog.Builder(this)
@@ -972,7 +998,12 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                             web.clearCache(true);
                             notice("Cookies and site data cleared");
                             break;
-                        case 9: finishAndRemoveTask(); break;
+                        case 9:
+                            notice("Updating ad-block lists…");
+                            FilterUpdater.run(this, prefs, true, (ok, msg) ->
+                                    notice(ok ? "Ad-block lists updated · " + msg : "Update failed, keeping current lists"));
+                            break;
+                        case 10: finishAndRemoveTask(); break;
                     }
                 })
                 .show();

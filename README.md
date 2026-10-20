@@ -41,6 +41,9 @@ Bookmarks button in the toolbar jumps to the bookmarks.
   and halves the count (down to 1); servers without range support get one plain stream; at most
   16 MB is in flight. A refused piece (403/416/429/503, i.e. rate limiting) switches the rest of
   the download to one continuous connection from that byte, and the host stays single-stream.
+- **Tunneled playback** (TV player): the TV's video hardware does frame timing and A/V sync
+  (these TCL/MediaTek decoders support it for H.264/HEVC/VP9/AV1). Measured on a 1080p .mkv:
+  ~31 % total CPU vs ~48 % without, 0 dropped frames. Off switch in the player's Menu panel.
 - **Quality**: capped at 1080p / 60 fps (both players); below that, whatever the site serves.
 - **RAM**: filter lists are memory-mapped from the APK (no heap); in-page hls.js players get a lean
   buffer (10 s behind, 20-40 s ahead) unless the site sets its own; Wi-Fi is kept out of power-save
@@ -63,7 +66,7 @@ Bookmarks button in the toolbar jumps to the bookmarks.
   memory while you're only browsing. Videos with sound, and anything after a click, play normally.
 - Blocker cost per page is kept off the page's main thread: hiding rules indexed in the heap,
   list answers cached per host, list files pre-warmed at start.
-- `adb logcat -s ClearPerf` prints load timing and blocker cost for every page.
+- With test logging on, `adb logcat -s ClearPerf` prints load timing and blocker cost for every page.
 
 Measured on the Bedroom TV, cold app start, first paint: YouTube 5.7-7.3 s -> 3.4 s,
 Crunchyroll 5.9 s -> 3.3 s (fully loaded 9.7 s -> 2.8 s).
@@ -77,6 +80,20 @@ screen the renderer runs at foreground priority and is safe.
 Known limit: both TVs' low-memory killer (lmkd) fails to read /proc/zoneinfo ("parse error"), so
 idle apps are never reclaimed and the system lives in swap. That's TCL firmware; it needs root or a
 firmware update to fix.
+
+## Block-list updates
+
+Every 4 days (the lists' own "Expires", clamped to 1-14 days) the app downloads the lists over
+HTTPS and compiles them on the TV (`FilterCompiler`, a byte-identical port of
+`tools/build_filters.py`; ~33 s on these TVs), sanity-checks the result, then swaps the new files
+in at once. Any failure keeps the current lists and retries in an hour. Never runs while the TV
+player is on screen. ⋮ → "Update ad-block lists now" forces it.
+
+## Test logging
+
+Off by default. `adb shell setprop log.tag.Clear DEBUG` and restart the app to get per-page timing
+and blocker cost (`ClearPerf`), per-request blocks (`ClearBlock`), in-page video stats
+(`ClearVideo`), TV player stats and tunneling state (`ClearPlayer`) and downloader decisions (`ClearDL`).
 
 ## Remote
 

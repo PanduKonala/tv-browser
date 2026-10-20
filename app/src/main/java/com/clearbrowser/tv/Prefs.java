@@ -63,6 +63,19 @@ final class Prefs {
     int subtitlePosition() { return sp.getInt("sub_pos", 0); }
     void setSubtitlePosition(int p) { sp.edit().putInt("sub_pos", p).apply(); }
 
+    /** TV player: tunneled playback (the TV's video hardware does frame timing and A/V sync). */
+    boolean tunneling() { return sp.getBoolean("tunneling", true); }
+    void setTunneling(boolean on) { sp.edit().putBoolean("tunneling", on).apply(); }
+
+    /** Block-list updates: when the current set was fetched, and when the next is due. */
+    long filtersUpdated() { return sp.getLong("filters_updated", 0); }
+    long filtersNextUpdate() {
+        // First run: the lists in the APK are as old as the build; next one due 4 days after it.
+        return sp.getLong("filters_next", Math.max(BuildConfig.FILTERS_BUILT, filtersUpdated()) + 4 * 24 * 3_600_000L);
+    }
+    void setFiltersNextUpdate(long t) { sp.edit().putLong("filters_next", t).apply(); }
+    void setFiltersUpdated(long when, long next) { sp.edit().putLong("filters_updated", when).putLong("filters_next", next).apply(); }
+
     boolean autoplay() { return sp.getBoolean("autoplay", false); }
     void setAutoplay(boolean on) { sp.edit().putBoolean("autoplay", on).apply(); }
 

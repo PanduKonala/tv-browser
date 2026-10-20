@@ -31,29 +31,71 @@ final class Blocker {
     private volatile Map<String, String> genericHeap;
     /** Recent answers per host: a page asks about the same few hosts hundreds of times. */
     private final ConcurrentHashMap<String, Boolean> hostCache = new ConcurrentHashMap<>();
-    private String genericAlways = "";
+    private volatile String genericAlways = "";
     private final LruCache<String, String> siteCss = new LruCache<>(16);
 
     /** Just mmap calls: cheap enough for Application.onCreate. */
     synchronized void init(Context ctx) {
         if (domains != null) return;
-        Context app = ctx.getApplicationContext();
-        generic = SortedLines.map(app, "filters/generic.tsv");
-        cosmetic = SortedLines.map(app, "filters/cosmetic.tsv");
-        genericAlways = rules(generic.value("*"));
-        domains = SortedLines.map(app, "filters/domains.txt");
+        load(ctx.getApplicationContext());
+    }
+
+    /** New lists from FilterUpdater: swap them in. Lookups in flight finish on the old mapping. */
+    synchronized void reload(Context ctx) {
+        load(ctx.getApplicationContext());
+    }
+
+    /** Updated lists in files/filters/ when there are any, else the ones shipped in the APK. */
+    private void load(Context app) {
+        java.io.File dir = new java.io.File(app.getFilesDir(), "filters");
+        SortedLines d = null, g = null, c = null;
+        if (new java.io.File(dir, "domains.txt").length() > 1_000_000) {
+            d = SortedLines.map(new java.io.File(dir, "domains.txt"));
+            g = SortedLines.map(new java.io.File(dir, "generic.tsv"));
+            c = SortedLines.map(new java.io.File(dir, "cosmetic.tsv"));
+            if (d.isEmpty() || g.isEmpty() || c.isEmpty()) d = null;
+        }
+        final boolean fromFiles = d != null;
+        if (!fromFiles) {
+            d = SortedLines.map(app, "filters/domains.txt");
+            g = SortedLines.map(app, "filters/generic.tsv");
+            c = SortedLines.map(app, "filters/cosmetic.tsv");
+        }
+        generic = g;
+        cosmetic = c;
+        genericAlways = rules(g.value("*"));
+        domains = d;
+        siteCss.evictAll();
+        hostCache.clear();
+        final SortedLines gg = g, cc = c, dd = d;
         Thread t = new Thread(() -> {
-            genericHeap = loadMap(app, "filters/generic.tsv");
-            cosmetic.warm();
-            domains.warm();
+            genericHeap = fromFiles ? loadMap(new java.io.File(dir, "generic.tsv")) : loadMap(app, "filters/generic.tsv");
+            cc.warm();
+            dd.warm();
         }, "filter-warm");
         t.setDaemon(true);
         t.start();
     }
 
+    private static Map<String, String> loadMap(java.io.File f) {
+        try {
+            return loadMap(new java.io.FileInputStream(f));
+        } catch (java.io.IOException e) {
+            return null;
+        }
+    }
+
     private static Map<String, String> loadMap(Context ctx, String asset) {
+        try {
+            return loadMap(ctx.getAssets().open(asset));
+        } catch (java.io.IOException e) {
+            return null;
+        }
+    }
+
+    private static Map<String, String> loadMap(java.io.InputStream stream) {
         Map<String, String> m = new HashMap<>(20000);
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(ctx.getAssets().open(asset), StandardCharsets.UTF_8))) {
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
             String line;
             while ((line = r.readLine()) != null) {
                 int tab = line.indexOf('\t');

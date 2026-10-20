@@ -149,7 +149,7 @@ final class ParallelHttpDataSource implements DataSource {
         long rest = Math.max(0, len - firstBytes.length);
         piece = (int) Math.max(MIN_PIECE, Math.min(MAX_PIECE, (rest + connections - 1) / Math.max(1, connections)));
         count = 1 + (int) ((rest + piece - 1) / piece);
-        if (count > 1) Log.i("ClearDL", host + ": " + len / 1024 + " KB in " + count + " pieces over "
+        if (count > 1 && Debug.ON) Log.i("ClearDL", host + ": " + len / 1024 + " KB in " + count + " pieces over "
                 + Math.min(connections, count - 1) + " connections (host limit " + connections + ")");
         pieces.clear();
         firstLen = firstBytes.length;

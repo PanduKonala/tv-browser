@@ -57,6 +57,7 @@ public class PlayerActivity extends Activity {
     private static final String TAG = "ClearPlayer";
 
     private ExoPlayer player;
+    private DefaultTrackSelector selector;
     private PlayerView view;
     private int stalls, dropped;
     private boolean wasReady;
@@ -89,7 +90,7 @@ public class PlayerActivity extends Activity {
         Bundle h = in.getBundleExtra(EXTRA_HEADERS);
         Map<String, String> headers = new HashMap<>();
         if (h != null) for (String k : h.keySet()) headers.put(k, h.getString(k));
-        Log.i(TAG, "open " + url + " headers=" + headers.keySet() + " referer=" + headers.get("Referer"));
+        if (Debug.ON) Log.i(TAG, "open " + url + " headers=" + headers.keySet());
 
         DefaultHttpDataSource.Factory http = new DefaultHttpDataSource.Factory()
                 .setUserAgent(in.getStringExtra(EXTRA_UA))
@@ -98,11 +99,15 @@ public class PlayerActivity extends Activity {
                 .setConnectTimeoutMs(15000)
                 .setReadTimeoutMs(15000);
         // Up to 1080p / 60 fps, whatever the screen's UI resolution; within that, ExoPlayer adapts to the connection.
-        DefaultTrackSelector selector = new DefaultTrackSelector(this);
+        selector = new DefaultTrackSelector(this);
+        // Tunneled playback when the TV's decoder supports it (these TCL/MediaTek ones do): the video
+        // hardware handles frame timing and audio sync instead of the app pushing every frame, so a
+        // weak, busy CPU can't cause stutter. ExoPlayer quietly skips it for formats that can't tunnel.
         selector.setParameters(selector.buildUponParameters()
                 .clearViewportSizeConstraints()
                 .setMaxVideoSize(1920, 1080)
-                .setMaxVideoFrameRate(60));
+                .setMaxVideoFrameRate(60)
+                .setTunnelingEnabled(prefs.tunneling()));
         // Lean RAM: buffer 15-40 s ahead (about 30 MB at 1080p), start after 1.5 s.
         DefaultLoadControl load = new DefaultLoadControl.Builder()
                 .setBufferDurationsMs(15_000, 40_000, 1_500, 3_000)
@@ -191,6 +196,7 @@ public class PlayerActivity extends Activity {
         player.addListener(new Player.Listener() {
             @Override
             public void onTracksChanged(@NonNull Tracks tracks) {
+                if (Debug.ON) Log.i(TAG, "tunneling " + (player != null && player.isTunnelingEnabled() ? "active" : "off"));
                 for (Tracks.Group g : tracks.getGroups()) {
                     if (g.getType() != C.TRACK_TYPE_TEXT && g.getType() != C.TRACK_TYPE_AUDIO) continue;
                     for (int i = 0; i < g.length; i++) {
@@ -205,7 +211,7 @@ public class PlayerActivity extends Activity {
         player.setMediaItem(item.build(), Math.max(0, (long) (in.getDoubleExtra(EXTRA_POS, 0) * 1000)));
         player.prepare();
         player.play();
-        view.postDelayed(stats, 10_000);
+        if (Debug.ON) view.postDelayed(stats, 10_000);
     }
 
     private final Runnable stats = new Runnable() {
@@ -299,8 +305,11 @@ public class PlayerActivity extends Activity {
         items.add("Size: " + SIZES[prefs.subtitleSize()]);
         items.add("Style: " + STYLES[prefs.subtitleStyle()]);
         items.add("Position: " + POSITIONS[prefs.subtitlePosition()]);
+        items.add(prefs.tunneling()
+                ? "Smooth playback (hardware tunneling): On" + (player.isTunnelingEnabled() ? "" : " — not used for this video")
+                : "Smooth playback (hardware tunneling): Off");
         subtitleMenu = new AlertDialog.Builder(this)
-                .setTitle("Subtitles")
+                .setTitle("Subtitles & playback")
                 .setItems(items.toArray(new String[0]), (d, which) -> {
                     TrackSelectionParameters.Builder b = player.getTrackSelectionParameters().buildUpon();
                     if (which == 0) {
@@ -326,7 +335,14 @@ public class PlayerActivity extends Activity {
                         int opt = which - afterTracks;
                         if (opt == 0) prefs.setSubtitleSize((prefs.subtitleSize() + 1) % SIZES.length);
                         else if (opt == 1) prefs.setSubtitleStyle((prefs.subtitleStyle() + 1) % STYLES.length);
-                        else prefs.setSubtitlePosition((prefs.subtitlePosition() + 1) % POSITIONS.length);
+                        else if (opt == 2) prefs.setSubtitlePosition((prefs.subtitlePosition() + 1) % POSITIONS.length);
+                        else {
+                            // Off switch in case a TV's tunneling misbehaves (audio drift, black frames).
+                            prefs.setTunneling(!prefs.tunneling());
+                            selector.setParameters(selector.buildUponParameters().setTunnelingEnabled(prefs.tunneling()));
+                            view.postDelayed(this::showSubtitleMenu, 600);
+                            return;
+                        }
                         applySubtitleLook();
                         // Re-open so the next press keeps cycling, with the change visible behind it.
                         view.post(this::showSubtitleMenu);

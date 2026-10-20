@@ -49,7 +49,9 @@
   // Cost of this script, read by the app for its ClearPerf log line.
   var S0 = window.__clearStats = { bridgeMs: 0, bridgeCalls: 0, scanMs: 0, scanned: 0, appends: 0, cssKB: 0, previewsHeld: 0,
                                    longMs: 0, longN: 0, lcp: 0 };
-  if (window.top === window && window.PerformanceObserver) {
+  var DEBUG = false;
+  try { DEBUG = !!(window.ClearBridge && ClearBridge.debug()); } catch (e) {}
+  if (DEBUG && window.top === window && window.PerformanceObserver) {
     try {
       new PerformanceObserver(function (l) {
         l.getEntries().forEach(function (e) { S0.longMs += e.duration; S0.longN++; });
@@ -244,7 +246,7 @@
   document.addEventListener('waiting', function (e) {
     if (e.target.tagName === 'VIDEO' && vStarted && !vStallAt) { vStalls++; vStallAt = Date.now(); }
   }, true);
-  setInterval(function () {
+  if (DEBUG) setInterval(function () {
     var vs = document.getElementsByTagName('video'), v = null;
     for (var i = 0; i < vs.length; i++) if (!vs[i].paused) { v = vs[i]; break; }
     if (!v || !B.videoStats) return;

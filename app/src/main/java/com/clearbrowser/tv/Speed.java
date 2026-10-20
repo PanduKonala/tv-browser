@@ -139,8 +139,8 @@ final class Speed {
         }
         try {
             profile.prefetchUrlAsync(url, new CancellationSignal(), bg, new WebViewOutcomeReceiver<Void, PrefetchException>() {
-                @Override public void onResult(Void v) { Log.i(TAG, "prefetched " + url); }
-                @Override public void onError(PrefetchException e) { Log.i(TAG, "prefetch skipped " + url + ": " + e.getMessage()); }
+                @Override public void onResult(Void v) { if (Debug.ON) Log.i(TAG, "prefetched " + url); }
+                @Override public void onError(PrefetchException e) { if (Debug.ON) Log.i(TAG, "prefetch skipped " + url + ": " + e.getMessage()); }
             });
         } catch (RuntimeException e) {
             canPrefetch = false;

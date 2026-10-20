@@ -8,6 +8,8 @@ final class Bridge {
         boolean shieldsOn();
         /** Hold back muted autoplay (previews, hero trailers) until the user clicks on the page. */
         boolean holdPreviews();
+        /** Test logging on (page timing, video stats): see Debug. */
+        boolean debug();
         /** event: "playing" when a video starts, "time" every couple of seconds while it plays. */
         void onVideo(String event, double position);
         /** A full-length video with sound started playing in some frame. */
@@ -36,6 +38,11 @@ final class Bridge {
     }
 
     @JavascriptInterface
+    public boolean debug() {
+        return host.debug();
+    }
+
+    @JavascriptInterface
     public boolean holdPreviews() {
         return host.holdPreviews();
     }
@@ -58,7 +65,7 @@ final class Bridge {
     /** Periodic playback health from a frame with a playing video (logged as ClearVideo). */
     @JavascriptInterface
     public void videoStats(String json) {
-        android.util.Log.i("ClearVideo", json);
+        if (Debug.ON) android.util.Log.i("ClearVideo", json);
     }
 
     @JavascriptInterface

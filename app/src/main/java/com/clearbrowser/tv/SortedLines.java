@@ -44,6 +44,17 @@ final class SortedLines {
 
     @SuppressWarnings("unused") private int len_ignored;
 
+    /** Maps a file written by FilterUpdater. */
+    static SortedLines map(java.io.File f) {
+        try (FileInputStream in = new FileInputStream(f)) {
+            return new SortedLines(in.getChannel().map(FileChannel.MapMode.READ_ONLY, 0, in.getChannel().size()));
+        } catch (IOException e) {
+            return EMPTY;
+        }
+    }
+
+    boolean isEmpty() { return len == 0; }
+
     boolean contains(String key) {
         return find(key.getBytes(StandardCharsets.UTF_8)) >= 0;
     }

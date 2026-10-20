@@ -10,8 +10,14 @@ android {
         applicationId 'com.clearbrowser.tv'
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        versionCode 2
+        versionName '1.1'
+        // When the block lists in the APK were compiled: the first in-app update is due 4 days later.
+        buildConfigField 'long', 'FILTERS_BUILT', "${file('src/main/assets/filters/domains.txt').lastModified()}L"
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     buildTypes {
