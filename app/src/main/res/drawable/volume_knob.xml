@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- White knob with a red ring, as on the reference player's volume slider. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <size android:width="14dp" android:height="14dp" />
+    <solid android:color="#FFFFFF" />
+    <stroke android:width="3dp" android:color="#E50914" />
+</shape>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- View tags on settings-panel rows. -->
+    <item name="panel_checked" type="id" />
+    <item name="panel_adjust" type="id" />
+</resources>

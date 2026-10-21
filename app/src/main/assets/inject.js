@@ -156,9 +156,68 @@
   try { lite = B.liteEffects(); } catch (e) {}
   if (lite) {
     var ls = document.createElement('style');
-    ls.textContent = '*,*::before,*::after{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}';
-    (document.head || document.documentElement).appendChild(ls);
-    document.addEventListener('DOMContentLoaded', function () { if (!ls.isConnected) (document.head || document.documentElement).appendChild(ls); });
+    // No frosted glass, and no endless decorative pulses (Tailwind's animate-ping/pulse "live" dots):
+    // each keeps the TV redrawing the whole screen. Loading spinners keep spinning.
+    ls.textContent = '*,*::before,*::after{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}'
+        + '[class*="animate-ping"],[class*="animate-pulse"]{animation:none!important}';
+    // New frames can start before their document has an element to attach to: wait for one
+    // rather than fail (a throw here would stop everything below in that frame).
+    var putLite = function () {
+      var root = document.head || document.documentElement;
+      if (!root) return false;
+      if (!ls.isConnected) root.appendChild(ls);
+      return true;
+    };
+    if (!putLite()) {
+      var waitRoot = new MutationObserver(function () { if (putLite()) waitRoot.disconnect(); });
+      waitRoot.observe(document, { childList: true, subtree: true });
+    }
+    document.addEventListener('DOMContentLoaded', putLite);
+
+    // Decorative canvases (animated WebGL shaders or 2D effects behind the page) make a weak TV repaint and
+    // recombine the screen 60 times a second even when nothing else moves (one site drew 1,165
+    // frames while idle). Hide them, so the page's own background colour shows and the TV goes
+    // quiet; their drawing loop keeps running but on a tiny, hidden canvas. Only canvases that
+    // cover a large part of the screen *behind* the content and take no clicks: games, maps and
+    // players are left alone.
+    var realGetContext = HTMLCanvasElement.prototype.getContext;
+    var widthProp = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width');
+    var heightProp = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'height');
+    HTMLCanvasElement.prototype.getContext = function (type) {
+      var ctx = realGetContext.apply(this, arguments);
+      if (ctx && /webgl|2d/i.test(String(type)) && !this.__clearBg) {
+        this.__clearBg = 1;
+        var c = this;
+        setTimeout(function () { try { if (isBackdrop(c)) shrink(c); } catch (e) {} }, 800);
+      }
+      return ctx;
+    };
+    var isBackdrop = function (c) {
+      if (!c.isConnected) return false;
+      var r = c.getBoundingClientRect();
+      if (r.width * r.height < innerWidth * innerHeight * 0.25) return false;
+      var behind = false;
+      for (var el = c; el && el !== document.documentElement; el = el.parentElement) {
+        var s = getComputedStyle(el);
+        if (s.pointerEvents === 'none' || parseInt(s.zIndex, 10) < 0 || el.getAttribute('aria-hidden') === 'true') behind = true;
+        if (s.position === 'fixed' || s.position === 'absolute') return behind;
+      }
+      return false;
+    };
+    var shrink = function (c) {
+      var scale = 0.25;
+      Object.defineProperty(c, 'width', { configurable: true,
+        get: function () { return widthProp.get.call(c); },
+        set: function (v) { widthProp.set.call(c, Math.max(1, Math.round(v * scale))); } });
+      Object.defineProperty(c, 'height', { configurable: true,
+        get: function () { return heightProp.get.call(c); },
+        set: function (v) { heightProp.set.call(c, Math.max(1, Math.round(v * scale))); } });
+      // Apply now; the page's own resize code goes through the same setters from here on.
+      c.width = widthProp.get.call(c);
+      c.height = heightProp.get.call(c);
+      c.style.setProperty('display', 'none', 'important');
+      window.dispatchEvent(new Event('resize'));
+    };
   }
 
   // Muted autoplay is how sites run previews and hero trailers while you're only browsing; each
@@ -272,6 +331,45 @@
     } catch (x) {}
   }, 10000);
 
+  // The subtitle list the page's player knows about, from the common web players: plain <track>
+  // elements, Vidstack (<media-player>.textTracks), Video.js and JW Player. Thumbnail and chapter
+  // tracks are left out; each entry carries its format when the player says it.
+  function subtitleList() {
+    var out = [], seen = Object.create(null);
+    function add(src, label, lang, kind, type) {
+      if (!src || typeof src !== 'string') return;
+      if (kind && !/^(subtitles|captions)$/i.test(kind)) return;
+      try { src = new URL(src, location.href).href; } catch (e) { return; }
+      if (!/^https?:/.test(src) || seen[src]) return;
+      seen[src] = 1;
+      out.push({ src: src, label: label || '', lang: lang || '', type: type || '' });
+    }
+    var ts = document.querySelectorAll('track[src]');
+    for (var i = 0; i < ts.length; i++) add(ts[i].src, ts[i].label, ts[i].srclang, ts[i].kind || 'subtitles', '');
+    var mp = document.querySelectorAll('media-player');
+    for (var m = 0; m < mp.length; m++) {
+      try {
+        var tl = mp[m].textTracks, arr = tl ? (tl.toArray ? tl.toArray() : Array.prototype.slice.call(tl)) : [];
+        arr.forEach(function (t) { add(t.src, t.label, t.language, t.kind, t.type); });
+      } catch (e) {}
+    }
+    try {
+      if (window.videojs && videojs.getPlayers) {
+        var ps = videojs.getPlayers();
+        for (var id in ps) {
+          var rt = ps[id] && ps[id].remoteTextTracks ? ps[id].remoteTextTracks() : null;
+          for (var r = 0; rt && r < rt.length; r++) add(rt[r].src, rt[r].label, rt[r].language, rt[r].kind, '');
+        }
+      }
+    } catch (e) {}
+    try {
+      var j = window.jwplayer && jwplayer();
+      var item = j && j.getPlaylistItem && j.getPlaylistItem();
+      ((item && item.tracks) || []).forEach(function (t) { add(t.file, t.label, t.language, t.kind || 'captions', ''); });
+    } catch (e) {}
+    return out;
+  }
+
   // Tell the app where the page's video is, so the TV player can pick up at the same spot.
   var lastTime = 0;
   document.addEventListener('playing', function (e) {
@@ -281,13 +379,8 @@
     // A real video (sound on, longer than a clip, or live) started: the app may move it to the TV player.
     var d = v.duration;
     if (!v.muted && v.volume > 0 && (!isFinite(d) || d > 90)) {
-      // Subtitle tracks the player declared (it may not have downloaded them yet).
-      var subs = [];
-      var ts = v.querySelectorAll('track[src]');
-      for (var i = 0; i < ts.length; i++) {
-        var k = ts[i].kind || 'subtitles';
-        if (k === 'subtitles' || k === 'captions') subs.push({ src: ts[i].src, label: ts[i].label || '', lang: ts[i].srclang || '' });
-      }
+      // Every subtitle the page's player offers (it may not have downloaded them yet).
+      var subs = subtitleList();
       try { B.videoStarted(v.currentTime || 0, JSON.stringify(subs), v.currentSrc || '', location.origin); } catch (x) {}
     }
   }, true);

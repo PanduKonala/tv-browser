@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  One bar at the bottom, nothing over the middle of the picture: a thin red timeline across the
+  top, then play/pause, back/forward 10 s, volume and the time on the left; subtitles, servers
+  and settings on the right. exo_progress / exo_position / exo_duration are driven by Media3;
+  the clear_* buttons are handled by PlayerActivity.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clipChildren="false"
+    android:clipToPadding="false">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@drawable/controls_shade"
+        android:clipChildren="false"
+        android:clipToPadding="false"
+        android:orientation="vertical"
+        android:paddingTop="48dp"
+        android:paddingBottom="10dp">
+
+        <androidx.media3.ui.DefaultTimeBar
+            android:id="@id/exo_progress"
+            android:layout_width="match_parent"
+            android:layout_height="22dp"
+            android:layout_marginStart="10dp"
+            android:layout_marginEnd="10dp"
+            android:focusable="true"
+            app:bar_height="3dp"
+            app:buffered_color="#66FFFFFF"
+            app:played_color="#E50914"
+            app:scrubber_color="#E50914"
+            app:scrubber_disabled_size="0dp"
+            app:scrubber_enabled_size="12dp"
+            app:scrubber_dragged_size="16dp"
+            app:unplayed_color="#33FFFFFF" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:clipChildren="false"
+            android:clipToPadding="false"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="24dp"
+            android:paddingEnd="20dp">
+
+            <ImageButton
+                android:id="@+id/clear_play"
+                style="@style/PlayerBarButton"
+                android:contentDescription="Play or pause"
+                android:src="@drawable/ic_p_pause" />
+
+            <FrameLayout
+                android:id="@+id/clear_back10"
+                style="@style/PlayerBarButton"
+                android:contentDescription="Back 10 seconds">
+                <ImageView
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_p_back" />
+                <TextView
+                    style="@style/PlayerBarAmount"
+                    android:text="10" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/clear_fwd10"
+                style="@style/PlayerBarButton"
+                android:contentDescription="Forward 10 seconds">
+                <ImageView
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_p_fwd" />
+                <TextView
+                    style="@style/PlayerBarAmount"
+                    android:text="10" />
+            </FrameLayout>
+
+            <ImageButton
+                android:id="@+id/clear_volume"
+                style="@style/PlayerBarButton"
+                android:contentDescription="Mute"
+                android:src="@drawable/ic_p_volume" />
+
+            <SeekBar
+                android:id="@+id/clear_volume_bar"
+                android:layout_width="96dp"
+                android:layout_height="20dp"
+                android:layout_marginEnd="14dp"
+                android:clickable="false"
+                android:focusable="false"
+                android:max="100"
+                android:paddingStart="7dp"
+                android:paddingEnd="7dp"
+                android:progress="100"
+                android:progressBackgroundTint="#55FFFFFF"
+                android:progressTint="#E50914"
+                android:splitTrack="false"
+                android:thumb="@drawable/volume_knob" />
+
+            <TextView
+                android:id="@id/exo_position"
+                style="@style/PlayerBarTime"
+                android:text="0:00" />
+
+            <TextView
+                style="@style/PlayerBarTime"
+                android:text="  /  " />
+
+            <TextView
+                android:id="@id/exo_duration"
+                style="@style/PlayerBarTime"
+                android:text="0:00" />
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <ImageButton
+                android:id="@+id/clear_subs"
+                style="@style/PlayerBarButton"
+                android:contentDescription="Subtitles"
+                android:src="@drawable/ic_p_subs" />
+
+            <ImageButton
+                android:id="@+id/clear_servers"
+                style="@style/PlayerBarButton"
+                android:contentDescription="Servers"
+                android:src="@drawable/ic_p_servers" />
+
+            <ImageButton
+                android:id="@+id/clear_settings"
+                style="@style/PlayerBarButton"
+                android:contentDescription="Settings"
+                android:src="@drawable/ic_p_settings" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

@@ -278,7 +278,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                     org.json.JSONArray a = new org.json.JSONArray(subtitlesJson == null ? "[]" : subtitlesJson);
                     for (int i = 0; i < a.length(); i++) {
                         JSONObject o = a.getJSONObject(i);
-                        noteSubtitle(o.optString("src"), o.optString("label"), o.optString("lang"));
+                        noteSubtitle(o.optString("src"), o.optString("label"), o.optString("lang"), o.optString("type"));
                     }
                 } catch (JSONException ignored) { }
                 // Give the stream's own request a moment to be seen, then move it to the TV player:
@@ -633,7 +633,9 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             + "hi|hin|hindi|ta|tam|tamil|te|tel|telugu|ar|ara|arabic|ja|jpn|japanese|ko|kor|korean|zh|chi|zho|chinese|ru|rus|russian)(?:[^a-z]|$)");
 
     /** A subtitle file (fetched by the page or declared as a track): keep it for the TV player. */
-    private void noteSubtitle(String url, String label, String lang) {
+    private void noteSubtitle(String url, String label, String lang) { noteSubtitle(url, label, lang, ""); }
+
+    private void noteSubtitle(String url, String label, String lang, String type) {
         if (url == null || !url.startsWith("http")) return;
         // Players also use .vtt files for scrubbing thumbnails; those feed the TV player's preview carousel.
         String lower = url.toLowerCase(Locale.US);
@@ -649,9 +651,12 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         b.putString("url", url);
         b.putString("label", label == null || label.isEmpty() ? name : label);
         b.putString("lang", lang);
+        b.putString("type", type == null ? "" : type.toLowerCase(Locale.US));
         synchronized (subtitles) {
-            if (!subtitles.containsKey(url)) subtitles.put(url, b);
-            if (subtitles.size() > 20) subtitles.remove(subtitles.keySet().iterator().next());
+            // The player's own list is better labelled than a file we only saw downloaded: let it win.
+            Bundle had = subtitles.get(url);
+            if (had == null || label != null && !label.isEmpty()) subtitles.put(url, b);
+            if (subtitles.size() > 40) subtitles.remove(subtitles.keySet().iterator().next());
         }
     }
 
@@ -990,7 +995,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                 "Clear cookies and site data",
                 "Update ad-block lists now  (last: " + (prefs.filtersUpdated() == 0 ? "built in"
                         : android.text.format.DateFormat.getMediumDateFormat(this).format(new java.util.Date(prefs.filtersUpdated()))) + ")",
-                prefs.liteEffects() ? "Smooth scrolling (skip blur effects): on" : "Smooth scrolling (skip blur effects): off",
+                prefs.liteEffects() ? "Lighter effects (no blur, light backgrounds): on" : "Lighter effects (no blur, light backgrounds): off",
                 "Exit",
         };
         dialog = new AlertDialog.Builder(this)
@@ -1034,7 +1039,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                             break;
                         case 10:
                             prefs.setLiteEffects(!prefs.liteEffects());
-                            notice(prefs.liteEffects() ? "Smooth scrolling on" : "Sites keep their blur effects");
+                            notice(prefs.liteEffects() ? "Lighter effects on" : "Sites keep their full effects");
                             hideToolbar();
                             web.reload();
                             break;
