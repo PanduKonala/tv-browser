@@ -106,6 +106,10 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     private volatile double videoPos;
     /** What the page's video element reports it is playing (exact for file players, blob: for MSE). */
     private volatile String playingSrc;
+    /** Origin of the frame whose player is playing: servers behind it expect it as Origin/Referer. */
+    private volatile String playerOrigin;
+    /** WebVTT preview-thumbnail track the page's player loaded (sprite tiles), for the scrub carousel. */
+    private volatile String thumbnailsUrl;
     /** Candidates tried for this video; a refused one moves on to the next before giving up. */
     private int playerRetries;
     private volatile String userAgent = "";
@@ -266,9 +270,10 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                 videoPos = position;
                 if ("playing".equals(event)) playingAt = SystemClock.elapsedRealtime();
             }
-            @Override public void onVideoStarted(double position, String subtitlesJson, String src) {
+            @Override public void onVideoStarted(double position, String subtitlesJson, String src, String frameOrigin) {
                 videoPos = position;
                 playingSrc = src;
+                playerOrigin = frameOrigin != null && frameOrigin.startsWith("http") ? frameOrigin : null;
                 try {
                     org.json.JSONArray a = new org.json.JSONArray(subtitlesJson == null ? "[]" : subtitlesJson);
                     for (int i = 0; i < a.length(); i++) {
@@ -415,6 +420,8 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             pageBlocked.set(0);
             streams.clear();
             playingSrc = null;
+            playerOrigin = null;
+            thumbnailsUrl = null;
             playerRetries = 0;
             synchronized (subtitles) { subtitles.clear(); }
             filterNanos.set(0);
@@ -628,8 +635,10 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     /** A subtitle file (fetched by the page or declared as a track): keep it for the TV player. */
     private void noteSubtitle(String url, String label, String lang) {
         if (url == null || !url.startsWith("http")) return;
-        // Players also use .vtt files for scrubbing thumbnails; those aren't subtitles.
-        if (url.toLowerCase(Locale.US).matches(".*(thumb|sprite|storyboard|preview|seek|chapters).*")) return;
+        // Players also use .vtt files for scrubbing thumbnails; those feed the TV player's preview carousel.
+        String lower = url.toLowerCase(Locale.US);
+        if (lower.matches(".*(thumb|sprite|storyboard|preview|seek).*")) { thumbnailsUrl = url; return; }
+        if (lower.contains("chapters")) return;
         Uri u = Uri.parse(url);
         String name = u.getLastPathSegment() == null ? "Subtitles" : Uri.decode(u.getLastPathSegment());
         if (lang == null || lang.isEmpty()) {
@@ -716,6 +725,12 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         synchronized (subtitles) {
             i.putParcelableArrayListExtra(PlayerActivity.EXTRA_SUBS, new ArrayList<>(subtitles.values()));
         }
+        if (playerOrigin != null) {
+            i.putExtra(PlayerActivity.EXTRA_ORIGIN, playerOrigin);
+            // The web view hides the Referer it sends; the player's own origin is what these servers check.
+            if (!s.headers.containsKey("Referer")) s.headers.putString("Referer", playerOrigin + "/");
+        }
+        if (thumbnailsUrl != null) i.putExtra(PlayerActivity.EXTRA_THUMBS, thumbnailsUrl);
         startActivityForResult(i, REQ_PLAYER);
         return true;
     }

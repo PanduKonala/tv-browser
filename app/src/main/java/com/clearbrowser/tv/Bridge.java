@@ -16,7 +16,7 @@ final class Bridge {
         void onVideo(String event, double position);
         /** A full-length video with sound started playing in some frame. */
         /** src: the file the page's player is actually playing (blob: for MSE players). */
-        void onVideoStarted(double position, String subtitlesJson, String src);
+        void onVideoStarted(double position, String subtitlesJson, String src, String frameOrigin);
         /** From the bookmarks page only (the host checks which page is showing). */
         void removeBookmark(String url);
         /** From the home page only. */
@@ -76,8 +76,8 @@ final class Bridge {
     }
 
     @JavascriptInterface
-    public void videoStarted(double position, String subtitlesJson, String src) {
-        host.onVideoStarted(position, subtitlesJson, src);
+    public void videoStarted(double position, String subtitlesJson, String src, String frameOrigin) {
+        host.onVideoStarted(position, subtitlesJson, src, frameOrigin);
     }
 
     @JavascriptInterface

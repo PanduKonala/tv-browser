@@ -288,7 +288,7 @@
         var k = ts[i].kind || 'subtitles';
         if (k === 'subtitles' || k === 'captions') subs.push({ src: ts[i].src, label: ts[i].label || '', lang: ts[i].srclang || '' });
       }
-      try { B.videoStarted(v.currentTime || 0, JSON.stringify(subs), v.currentSrc || ''); } catch (x) {}
+      try { B.videoStarted(v.currentTime || 0, JSON.stringify(subs), v.currentSrc || '', location.origin); } catch (x) {}
     }
   }, true);
   document.addEventListener('timeupdate', function (e) {

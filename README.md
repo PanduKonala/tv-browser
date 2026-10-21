@@ -41,6 +41,11 @@ Bookmarks button in the toolbar jumps to the bookmarks.
   and halves the count (down to 1); servers without range support get one plain stream; at most
   16 MB is in flight. A refused piece (403/416/429/503, i.e. rate limiting) switches the rest of
   the download to one continuous connection from that byte, and the host stays single-stream.
+- **Seeking** (TV player, controls hidden): a Left/Right tap moves exactly 1 s; holding speeds up
+  (2 s, 5 s, 10 s, 30 s steps); FF/Rewind jump 10 s. Playback pauses while you scrub and jumps 1 s
+  after the last key (or on OK); Back cancels. A carousel shows previews around the target time
+  (the site's WebVTT thumbnail sprites when its player has them, fetched with the player's Origin;
+  otherwise frames from the video), with the time, the offset and a progress bar.
 - **Tunneled playback** (TV player): the TV's video hardware does frame timing and A/V sync
   (these TCL/MediaTek decoders support it for H.264/HEVC/VP9/AV1). Measured on a 1080p .mkv:
   ~31 % total CPU vs ~48 % without, 0 dropped frames. Off switch in the player's Menu panel.

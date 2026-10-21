@@ -8,7 +8,9 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.KeyEvent;
+import android.view.View;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -49,7 +51,7 @@ import java.util.Map;
 @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
 public class PlayerActivity extends Activity {
     static final String EXTRA_URL = "url", EXTRA_HEADERS = "headers", EXTRA_POS = "pos", EXTRA_UA = "ua",
-            EXTRA_SUBS = "subs";
+            EXTRA_SUBS = "subs", EXTRA_ORIGIN = "origin", EXTRA_THUMBS = "thumbs";
     private static final String[] SIZES = {"Small", "Medium", "Large", "Extra large"};
     private static final float[] SIZE_SCALE = {0.8f, 1.0f, 1.3f, 1.65f};
     private static final String[] STYLES = {"White, outlined", "Yellow, outlined", "White on dark box", "Yellow on dark box"};
@@ -68,6 +70,12 @@ public class PlayerActivity extends Activity {
     private Prefs prefs;
     private AlertDialog subtitleMenu;
     private boolean centerDown, centerLong;
+    // Scrubbing with Left/Right: target time, where it started, and whether to resume playing.
+    private ScrubOverlay scrub;
+    private Thumbnails thumbs;
+    private boolean scrubbing, scrubWasPlaying;
+    private long scrubStart, scrubTarget;
+    private final Runnable commitScrub = this::commitScrub;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -77,7 +85,14 @@ public class PlayerActivity extends Activity {
         view.setKeepScreenOn(true);
         view.setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING);
         view.setShowSubtitleButton(true); // CC in the on-screen controls
-        setContentView(view);
+        // Controls only when asked for (Up/Down, or OK to pause): auto-showing them on pause would
+        // grab Left/Right away from scrubbing.
+        view.setControllerAutoShow(false);
+        FrameLayout root = new FrameLayout(this);
+        root.addView(view);
+        scrub = new ScrubOverlay(this);
+        root.addView(scrub, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        setContentView(root);
         prefs = new Prefs(this);
         applySubtitleLook();
     }
@@ -91,6 +106,16 @@ public class PlayerActivity extends Activity {
         Map<String, String> headers = new HashMap<>();
         if (h != null) for (String k : h.keySet()) headers.put(k, h.getString(k));
         if (Debug.ON) Log.i(TAG, "open " + url + " headers=" + headers.keySet());
+        // Preview pictures for scrubbing: the site's thumbnail track, else frames from the video.
+        // Thumbnail servers check where the request comes from, like the page's own player.
+        Map<String, String> thumbHeaders = new HashMap<>(headers);
+        thumbHeaders.put("User-Agent", in.getStringExtra(EXTRA_UA));
+        String origin = in.getStringExtra(EXTRA_ORIGIN);
+        if (origin != null) {
+            thumbHeaders.put("Origin", origin);
+            if (!thumbHeaders.containsKey("Referer")) thumbHeaders.put("Referer", origin + "/");
+        }
+        thumbs = new Thumbnails(in.getStringExtra(EXTRA_THUMBS), url, thumbHeaders);
 
         DefaultHttpDataSource.Factory http = new DefaultHttpDataSource.Factory()
                 .setUserAgent(in.getStringExtra(EXTRA_UA))
@@ -359,9 +384,84 @@ public class PlayerActivity extends Activity {
         prefs.setSubtitleLanguage(f.language != null && !f.language.equals("und") ? f.language : "");
     }
 
+    // ---------------------------------------------------------------- scrubbing
+
+    /** Seconds per key event while held: a tap is exactly 1 s, holding speeds up to 30 s steps. */
+    private static long stepFor(int repeat) {
+        if (repeat < 8) return 1_000;
+        if (repeat < 20) return 2_000;
+        if (repeat < 35) return 5_000;
+        if (repeat < 55) return 10_000;
+        return 30_000;
+    }
+
+    private void scrubBy(long delta) {
+        if (player == null) return;
+        long duration = player.getDuration();
+        if (!scrubbing) {
+            scrubbing = true;
+            scrubWasPlaying = player.getPlayWhenReady();
+            player.pause();
+            view.hideController();
+            if (view.getSubtitleView() != null) view.getSubtitleView().setVisibility(View.INVISIBLE); // not behind the previews
+            scrubStart = scrubTarget = player.getCurrentPosition();
+        }
+        scrubTarget = Math.max(0, scrubTarget + delta);
+        if (duration > 0) scrubTarget = Math.min(scrubTarget, duration - 1000);
+        scrub.update(scrubTarget, scrubStart, player.getCurrentPosition(), duration, thumbs);
+        if (Debug.ON) Log.i(TAG, "scrub to " + ScrubOverlay.fmt(scrubTarget) + " (" + (scrubTarget - scrubStart) / 1000 + " s) overlay=" + scrub.isShown() + " h=" + scrub.getHeight());
+        view.removeCallbacks(commitScrub);
+        view.postDelayed(commitScrub, 1000);
+    }
+
+    /** Jump to the target (after a second without keys, or on OK). */
+    private void commitScrub() {
+        if (!scrubbing) return;
+        view.removeCallbacks(commitScrub);
+        scrubbing = false;
+        scrub.hide();
+        if (view.getSubtitleView() != null) view.getSubtitleView().setVisibility(View.VISIBLE);
+        if (player == null) return;
+        player.seekTo(scrubTarget);
+        if (scrubWasPlaying) player.play();
+    }
+
+    /** Back while scrubbing: stay where we were. */
+    private void cancelScrub() {
+        view.removeCallbacks(commitScrub);
+        scrubbing = false;
+        scrub.hide();
+        if (view.getSubtitleView() != null) view.getSubtitleView().setVisibility(View.VISIBLE);
+        if (player != null && scrubWasPlaying) player.play();
+    }
+
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
         int k = e.getKeyCode();
+        boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+        if (Debug.ON && down) Log.i(TAG, "key " + KeyEvent.keyCodeToString(k) + " repeat=" + e.getRepeatCount() + " controls=" + view.isControllerFullyVisible());
+        // Left/Right with the controls hidden (and FF/Rewind any time): scrub with previews.
+        boolean panelOpen = subtitleMenu != null && subtitleMenu.isShowing();
+        if (!panelOpen && (k == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || k == KeyEvent.KEYCODE_MEDIA_REWIND
+                || (!view.isControllerFullyVisible() && (k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT)))) {
+            if (down) {
+                int dir = (k == KeyEvent.KEYCODE_DPAD_RIGHT || k == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) ? 1 : -1;
+                boolean jump = k == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || k == KeyEvent.KEYCODE_MEDIA_REWIND;
+                scrubBy(dir * (jump ? 10_000 : stepFor(e.getRepeatCount())));
+            }
+            return true;
+        }
+        if (scrubbing) {
+            if (k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER) {
+                if (!down) commitScrub();
+                centerDown = centerLong = false;
+                return true;
+            }
+            if (k == KeyEvent.KEYCODE_BACK) {
+                if (!down) cancelScrub();
+                return true;
+            }
+        }
         if (k == KeyEvent.KEYCODE_MENU || k == KeyEvent.KEYCODE_CAPTIONS) {
             if (e.getAction() == KeyEvent.ACTION_UP) showSubtitleMenu();
             return true;
@@ -392,6 +492,8 @@ public class PlayerActivity extends Activity {
     protected void onStop() {
         // Release the decoder and buffers the moment we're not on screen: on a 1 GB TV that's the RAM back.
         view.removeCallbacks(stats);
+        view.removeCallbacks(commitScrub);
+        if (thumbs != null) { thumbs.close(); thumbs = null; }
         if (player != null) {
             setResult(RESULT_OK, new Intent().putExtra(EXTRA_POS, player.getCurrentPosition() / 1000.0));
             player.release();
