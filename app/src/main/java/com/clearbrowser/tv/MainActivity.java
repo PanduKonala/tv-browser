@@ -989,7 +989,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                 desktop ? "Desktop site: on  (switch to mobile)" : "Desktop site: off  (switch to desktop)",
                 site.isEmpty() ? "Ad blocking: on" : (shieldsOn ? "Turn ad blocking off for " : "Turn ad blocking on for ") + site,
                 prefs.tvPlayer() ? "Videos play in the TV player: on" : "Videos play in the TV player: off",
-                prefs.autoplay() ? "Muted previews and trailers: play (uses more memory)" : "Muted previews and trailers: wait for a click (saves memory)",
+                prefs.autoplay() ? "Hover previews and muted trailers: on (uses more memory)" : "Hover previews and muted trailers: off (play when clicked)",
                 "Play this page's video in the TV player",
                 "Forget allowed / blocked sites",
                 "Clear cookies and site data",
@@ -1016,7 +1016,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                             break;
                         case 5:
                             prefs.setAutoplay(!prefs.autoplay());
-                            notice(prefs.autoplay() ? "Previews autoplay" : "Previews wait for a click");
+                            notice(prefs.autoplay() ? "Hover previews on" : "Hover previews off");
                             web.reload();
                             break;
                         case 6:

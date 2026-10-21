@@ -71,8 +71,9 @@ Bookmarks button in the toolbar jumps to the bookmarks.
   and connections to them (DNS + TLS) open in parallel as soon as you navigate there. On these TVs
   DNS-over-TLS lookups took up to 1.6 s each; with preconnect they mostly drop to 0.
 - **Renderer warm-up** at launch.
-- **Muted previews and trailers wait for a click** (toggle in ⋮): they decode video and hold GPU
-  memory while you're only browsing. Videos with sound, and anything after a click, play normally.
+- **No hover previews or muted trailers** (toggle in ⋮): a muted video plays only right after a
+  click (you pressed its play button), so hovering over a card never starts one. They decode video
+  and hold GPU memory while you're only browsing. Videos with sound play normally.
 - Blocker cost per page is kept off the page's main thread: hiding rules indexed in the heap,
   list answers cached per host, list files pre-warmed at start.
 - With test logging on, `adb logcat -s ClearPerf` prints load timing and blocker cost for every page.

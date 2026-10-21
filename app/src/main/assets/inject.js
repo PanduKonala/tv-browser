@@ -229,26 +229,41 @@
     };
   }
 
-  // Muted autoplay is how sites run previews and hero trailers while you're only browsing; each
-  // one decodes video and holds GPU memory (about 16 MB on one Netflix-style page here). Hold
-  // those back until the first click on the page. Videos with sound, and anything after a click,
-  // play as normal.
+  // Muted autoplay is how sites run hover previews and hero trailers while you're only browsing;
+  // each one decodes video and holds GPU memory (about 16 MB on one Netflix-style page here). A
+  // muted video plays only when a click in this frame just happened (the user pressed play), and
+  // keeps playing after that. Hovering never counts, so hover previews stay off for the whole visit,
+  // not only until the first click. Videos with sound play as normal.
   var hold = false;
   try { hold = B.holdPreviews(); } catch (e) {}
-  if (hold && navigator.userActivation) {
-    var held = function (v) { return v.muted && !navigator.userActivation.hasBeenActive; };
+  if (hold) {
+    var lastPress = 0;
+    var pressed = function (e) {
+      if (e.type !== 'keydown' || e.key === 'Enter' || e.key === ' ') lastPress = Date.now();
+    };
+    ['pointerdown', 'mousedown', 'touchstart', 'keydown'].forEach(function (t) {
+      window.addEventListener(t, pressed, true);
+    });
+    var held = function (v) {
+      if (v.tagName !== 'VIDEO' || !v.muted || v.__clearOk) return false;
+      if (Date.now() - lastPress < 1000) { v.__clearOk = true; return false; }
+      return true;
+    };
+    var heldOne = function (v) {
+      S0.previewsHeld++;
+      if (DEBUG) try { B.videoStats(JSON.stringify({ previewHeld: String(v.currentSrc || v.src).slice(0, 120) })); } catch (e) {}
+    };
     var realPlay = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function () {
-      if (this.tagName === 'VIDEO' && held(this)) {
-        S0.previewsHeld++;
-        return Promise.reject(new DOMException('Muted autoplay held until a click', 'NotAllowedError'));
+      if (held(this)) {
+        heldOne(this);
+        return Promise.reject(new DOMException('Muted preview held: no click', 'NotAllowedError'));
       }
       return realPlay.apply(this, arguments);
     };
     // The autoplay attribute starts playback without calling play().
     document.addEventListener('play', function (e) {
-      var v = e.target;
-      if (v.tagName === 'VIDEO' && held(v)) { S0.previewsHeld++; v.pause(); }
+      if (held(e.target)) { heldOne(e.target); e.target.pause(); }
     }, true);
   }
 
