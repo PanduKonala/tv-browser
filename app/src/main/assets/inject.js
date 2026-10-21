@@ -245,6 +245,10 @@
       window.addEventListener(t, pressed, true);
     });
     var held = function (v) {
+      if (DEBUG && v.tagName === 'VIDEO') try {
+        B.videoStats(JSON.stringify({ playTry: location.hostname, muted: v.muted, vol: v.volume, ok: !!v.__clearOk,
+          sincePress: lastPress ? Date.now() - lastPress : -1 }));
+      } catch (e) {}
       if (v.tagName !== 'VIDEO' || !v.muted || v.__clearOk) return false;
       if (Date.now() - lastPress < 1000) { v.__clearOk = true; return false; }
       return true;
@@ -351,7 +355,8 @@
     try {
       B.videoStats(JSON.stringify({ pos: Math.round(v.currentTime), res: v.videoWidth + 'x' + v.videoHeight,
         stalls: vStalls, stallMs: vStallMs + (vStallAt ? Date.now() - vStallAt : 0), dropped: q.droppedVideoFrames,
-        frames: q.totalVideoFrames, ahead: Math.round(ahead), mse: /^blob:/.test(v.currentSrc), fs: !!document.fullscreenElement }));
+        frames: q.totalVideoFrames, ahead: Math.round(ahead), mse: /^blob:/.test(v.currentSrc), fs: !!document.fullscreenElement,
+        muted: v.muted, vol: v.volume, frame: location.hostname }));
     } catch (x) {}
   }, 10000);
 
