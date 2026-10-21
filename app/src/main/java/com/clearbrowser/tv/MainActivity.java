@@ -96,6 +96,9 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     private static final int REQ_PLAYER = 1;
     private static final class Stream {
         final long at; final String url; final Bundle headers;
+        /** Set when a frame's player was seen receiving it: that frame, and whether it lists qualities. */
+        volatile String origin;
+        volatile boolean master;
         Stream(long at, String url, Bundle headers) { this.at = at; this.url = url; this.headers = headers; }
     }
     private final List<Stream> streams = Collections.synchronizedList(new ArrayList<>());
@@ -292,6 +295,9 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                     if (playerOpen) { media("'pause'"); return; }
                     if (playInTvPlayer()) notice("Playing in the TV player · Back returns to the page");
                 }, 700);
+            }
+            @Override public void onPlaylist(String url, String frameOrigin, boolean master) {
+                notePlaylist(url, frameOrigin, master);
             }
             @Override public void removeBookmark(String url) {
                 ui.post(() -> {
@@ -691,8 +697,36 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     }
 
     /**
-     * The stream behind the video that's playing: the first manifest requested around when it
-     * started (later ones are its per-quality playlists), else the first one on the page.
+     * A playlist a frame's player received, whatever its address looks like (some sites serve them
+     * from /proxy?url=... or without an extension, which noteStream can't recognise). Known ones
+     * just learn their frame; new ones get the headers that frame's player sends.
+     */
+    private void notePlaylist(String url, String frameOrigin, boolean master) {
+        if (url == null || !url.startsWith("http")) return;
+        String origin = frameOrigin != null && frameOrigin.startsWith("http") ? frameOrigin : null;
+        synchronized (streams) {
+            for (Stream s : streams) if (s.url.equals(url)) { s.origin = origin; s.master = master; return; }
+            Bundle b = new Bundle();
+            if (origin != null) {
+                b.putString("Referer", origin + "/");
+                // Cross-site playlist requests from a player carry its Origin; same-site ones don't.
+                if (!origin.equals(Uri.parse(url).getScheme() + "://" + Uri.parse(url).getAuthority())) b.putString("Origin", origin);
+            }
+            String cookie = CookieManager.getInstance().getCookie(url);
+            if (cookie != null) b.putString("Cookie", cookie);
+            Stream s = new Stream(SystemClock.elapsedRealtime(), url, b);
+            s.origin = origin;
+            s.master = master;
+            streams.add(s);
+            if (Debug.ON) Log.d("ClearReq", "playlist from " + origin + (master ? " (qualities) " : " ") + url);
+            if (streams.size() > 40) streams.remove(0);
+        }
+    }
+
+    /**
+     * The stream behind the video that's playing: the newest quality list the playing frame's
+     * player received, else the first manifest requested around when it started (later ones are
+     * its per-quality playlists), else the first one on the page.
      */
     private Stream currentStream() {
         String src = playingSrc;
@@ -715,6 +749,17 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             return new Stream(SystemClock.elapsedRealtime(), src, b);
         }
         synchronized (streams) {
+            String origin = playerOrigin;
+            if (origin != null) {
+                Stream any = null;
+                for (int i = streams.size() - 1; i >= 0; i--) {
+                    Stream s = streams.get(i);
+                    if (nativeFailed.contains(s.url) || !origin.equals(s.origin)) continue;
+                    if (s.master) return s;
+                    if (any == null) any = s;
+                }
+                if (any != null) return any;
+            }
             long since = playingAt - 20_000;
             for (Stream s : streams) if (s.at >= since && !nativeFailed.contains(s.url)) return s;
             for (Stream s : streams) if (!nativeFailed.contains(s.url)) return s;
@@ -996,7 +1041,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                 desktop ? "Desktop site: on  (switch to mobile)" : "Desktop site: off  (switch to desktop)",
                 site.isEmpty() ? "Ad blocking: on" : (shieldsOn ? "Turn ad blocking off for " : "Turn ad blocking on for ") + site,
                 prefs.tvPlayer() ? "Videos play in the TV player: on" : "Videos play in the TV player: off",
-                prefs.autoplay() ? "Hover previews and muted trailers: on (uses more memory)" : "Hover previews and muted trailers: off (play when clicked)",
+                prefs.autoplay() ? "Autoplay: on (videos and previews start by themselves)" : "Autoplay: off (videos wait for you to press play)",
                 "Play this page's video in the TV player",
                 "Forget allowed / blocked sites",
                 "Clear cookies and site data",
@@ -1023,7 +1068,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                             break;
                         case 5:
                             prefs.setAutoplay(!prefs.autoplay());
-                            notice(prefs.autoplay() ? "Hover previews on" : "Hover previews off");
+                            notice(prefs.autoplay() ? "Autoplay on" : "Autoplay off: videos wait for play");
                             web.reload();
                             break;
                         case 6:

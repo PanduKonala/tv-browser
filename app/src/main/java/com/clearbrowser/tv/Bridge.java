@@ -23,6 +23,8 @@ final class Bridge {
         void clearRecent();
         /** The pointer rests on a link in the top page. */
         void prefetch(String url);
+        /** A frame's player received a playlist (it may not have a playlist-like address). */
+        void onPlaylist(String url, String frameOrigin, boolean master);
     }
 
     private final Host host;
@@ -86,10 +88,13 @@ final class Bridge {
         host.onVideoStarted(position, subtitlesJson, src, frameOrigin);
     }
 
-    /** A playlist the page's player just received (requested address, final address, text). */
+    /** A playlist the page's player just received (requested address, final address, text, frame). */
     @JavascriptInterface
-    public void playlist(String url, String finalUrl, String body) {
+    public void playlist(String url, String finalUrl, String body, String frameOrigin) {
+        if (body == null || !(body.startsWith("#EXTM3U") || body.contains("<MPD"))) return;
         PageCopies.put(url, finalUrl, body);
+        boolean master = body.contains("#EXT-X-STREAM-INF") || body.contains("<MPD");
+        host.onPlaylist(url, frameOrigin, master);
     }
 
     @JavascriptInterface

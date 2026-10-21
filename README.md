@@ -32,8 +32,11 @@ Bookmarks button in the toolbar jumps to the bookmarks.
   in-page 16 stalls in 21 s, 10 % dropped frames, no sound; TV player 0 stalls, 0 dropped, E-AC-3 sound.
   While the TV player is open, a page player that restarts itself behind it is paused again
   (no second TV player).
-- **Session-bound playlists**: the page's player passes each playlist it receives to the app, and
-  the TV player starts from that copy. Some embeds (enma.lol's tryembed server) keep the stream
+- **Any player, any address**: the page's player passes each playlist it receives to the app, so a
+  stream is found by its content even when its address doesn't look like one (`/proxy?url=…`, no
+  extension); the TV player takes the newest quality list from the frame whose video started, with
+  the Origin/Referer that frame's player sends.
+- **Session-bound playlists**: the TV player starts from the page's copy of the playlist. Some embeds (enma.lol's tryembed server) keep the stream
   session in partitioned cookies, which Android's CookieManager doesn't hand out, so asking the
   server again gets "403 Missing stream session". Only master and finished playlists are reused;
   live ones are fetched fresh.
@@ -78,9 +81,11 @@ Bookmarks button in the toolbar jumps to the bookmarks.
   and connections to them (DNS + TLS) open in parallel as soon as you navigate there. On these TVs
   DNS-over-TLS lookups took up to 1.6 s each; with preconnect they mostly drop to 0.
 - **Renderer warm-up** at launch.
-- **No hover previews or muted trailers** (toggle in ⋮): a muted video plays only right after a
-  click (you pressed its play button), so hovering over a card never starts one. They decode video
-  and hold GPU memory while you're only browsing. Videos with sound play normally.
+- **No autoplay** (toggle in ⋮): a video loads but plays only when you press play. Hover previews,
+  hero trailers and the next episode wait; with sound or muted. A video may start within a second of
+  a press in its frame, or up to 5 s after a press on the video itself or inside an embedded player
+  (players often load the stream first); the remote's play key counts as a press. Each preview would
+  also decode video and hold GPU memory on a TV that has little.
 - Blocker cost per page is kept off the page's main thread: hiding rules indexed in the heap,
   list answers cached per host, list files pre-warmed at start.
 - With test logging on, `adb logcat -s ClearPerf` prints load timing and blocker cost for every page.

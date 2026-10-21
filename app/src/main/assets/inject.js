@@ -33,8 +33,9 @@
     if (!v) v = all[0];
     if (v) {
       if (cmd && cmd.seek !== undefined) { v.currentTime = cmd.seek; v.pause(); }
-      else if (cmd === 'toggle') { if (v.paused) v.play(); else v.pause(); }
-      else if (cmd === 'play') v.play();
+      // The remote's play key is the user pressing play (see the autoplay hold below).
+      else if (cmd === 'toggle') { if (v.paused) { v.__clearOk = true; v.play(); } else v.pause(); }
+      else if (cmd === 'play') { v.__clearOk = true; v.play(); }
       else if (cmd === 'pause') v.pause();
       else if (isFinite(v.duration)) v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + cmd));
     }
@@ -237,7 +238,7 @@
     var sendList = function (url, finalUrl, text) {
       if (typeof text !== 'string' || text.length > 2097152) return;
       if (!/^\s*#EXTM3U|<MPD/.test(text.slice(0, 2048))) return;
-      try { B.playlist(new URL(url, location.href).href, finalUrl || '', text); } catch (e) {}
+      try { B.playlist(new URL(url, location.href).href, finalUrl || '', text, location.origin); } catch (e) {}
     };
     var xOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function (m, u) {
@@ -270,39 +271,53 @@
     };
   } catch (e) {}
 
-  // Muted autoplay is how sites run hover previews and hero trailers while you're only browsing;
-  // each one decodes video and holds GPU memory (about 16 MB on one Netflix-style page here). A
-  // muted video plays only when a click in this frame just happened (the user pressed play), and
-  // keeps playing after that. Hovering never counts, so hover previews stay off for the whole visit,
-  // not only until the first click. Videos with sound play as normal.
+  // No autoplay: a video loads but plays only when the user presses play. Sites start hover
+  // previews, hero trailers and the next episode by themselves; each one also decodes video and
+  // holds GPU memory on a TV that has little. A video may start right after a press in its frame
+  // (within a second), or up to 5 s after one when the press was on the video itself or inside an
+  // embedded player (players often load the stream first). The remote's play key counts as a
+  // press. Once the user started it, a video can resume freely; when it ends, the next one waits.
   var hold = false;
   try { hold = B.holdPreviews(); } catch (e) {}
   if (hold) {
-    var lastPress = 0;
+    var pressAt = 0, pressX = -1, pressY = -1;
     var pressed = function (e) {
-      if (e.type !== 'keydown' || e.key === 'Enter' || e.key === ' ') lastPress = Date.now();
+      if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+      pressAt = Date.now();
+      var p = e.touches && e.touches[0] ? e.touches[0] : e;
+      pressX = typeof p.clientX === 'number' ? p.clientX : -1;
+      pressY = typeof p.clientY === 'number' ? p.clientY : -1;
+      if (DEBUG) try { B.videoStats(JSON.stringify({ press: location.hostname, type: e.type, x: Math.round(pressX), y: Math.round(pressY) })); } catch (x) {}
     };
     ['pointerdown', 'mousedown', 'touchstart', 'keydown'].forEach(function (t) {
       window.addEventListener(t, pressed, true);
     });
+    var byUser = function (v) {
+      var since = Date.now() - pressAt;
+      if (since < 1000) return true;
+      if (since > 5000) return false;
+      if (window.top !== window) return true;
+      var r = v.getBoundingClientRect();
+      return pressX >= r.left && pressX <= r.right && pressY >= r.top && pressY <= r.bottom;
+    };
     var held = function (v) {
       if (DEBUG && v.tagName === 'VIDEO') try {
         B.videoStats(JSON.stringify({ playTry: location.hostname, muted: v.muted, vol: v.volume, ok: !!v.__clearOk,
-          sincePress: lastPress ? Date.now() - lastPress : -1 }));
+          sincePress: pressAt ? Date.now() - pressAt : -1 }));
       } catch (e) {}
-      if (v.tagName !== 'VIDEO' || !v.muted || v.__clearOk) return false;
-      if (Date.now() - lastPress < 1000) { v.__clearOk = true; return false; }
+      if (v.tagName !== 'VIDEO' || v.__clearOk) return false;
+      if (byUser(v)) { v.__clearOk = true; return false; }
       return true;
     };
     var heldOne = function (v) {
       S0.previewsHeld++;
-      if (DEBUG) try { B.videoStats(JSON.stringify({ previewHeld: String(v.currentSrc || v.src).slice(0, 120) })); } catch (e) {}
+      if (DEBUG) try { B.videoStats(JSON.stringify({ autoplayHeld: String(v.currentSrc || v.src).slice(0, 120) })); } catch (e) {}
     };
     var realPlay = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function () {
       if (held(this)) {
         heldOne(this);
-        return Promise.reject(new DOMException('Muted preview held: no click', 'NotAllowedError'));
+        return Promise.reject(new DOMException('Autoplay held: press play', 'NotAllowedError'));
       }
       return realPlay.apply(this, arguments);
     };
@@ -310,6 +325,7 @@
     document.addEventListener('play', function (e) {
       if (held(e.target)) { heldOne(e.target); e.target.pause(); }
     }, true);
+    document.addEventListener('ended', function (e) { e.target.__clearOk = false; }, true);
   }
 
   // Link prefetch: when the pointer rests on a link (or presses it), have the app fetch that
