@@ -58,7 +58,7 @@ final class Thumbnails {
     };
     /** Sprite sheets, still JPEG-compressed (~50-150 KB each). */
     private final LinkedHashMap<String, byte[]> sheets = new LinkedHashMap<String, byte[]>(8, 0.75f, true) {
-        @Override protected boolean removeEldestEntry(Map.Entry<String, byte[]> e) { return size() > 6; }
+        @Override protected boolean removeEldestEntry(Map.Entry<String, byte[]> e) { return size() > 40; }
     };
     private volatile List<Cue> cues;       // null until loaded; empty if the track failed
     private volatile boolean trackFailed;
@@ -107,6 +107,24 @@ final class Thumbnails {
         });
     }
 
+    /** Decodes the previews around {@code ms} ahead of time (scrub start), nearest first. */
+    void preload(long ms, int each) {
+        long step = interval();
+        for (int i = 0; i <= each; i++) {
+            for (int sign : new int[]{1, -1}) {
+                if (i == 0 && sign < 0) continue;
+                long t = ms + sign * i * step;
+                if (t < 0) continue;
+                final long b = bucket(t);
+                worker.execute(() -> {
+                    if (closed || bitmaps.get(b) != null) return;
+                    Bitmap bmp = useTrack() ? fromTrack(b) : null; // video frames are too slow to guess ahead
+                    if (bmp != null) bitmaps.put(b, bmp);
+                });
+            }
+        }
+    }
+
     private boolean useTrack() {
         return trackUrl != null && !trackFailed && cues != null && !cues.isEmpty();
     }
@@ -147,6 +165,18 @@ final class Thumbnails {
             }
             cues = list;
             if (Debug.ON) Log.i(TAG, "thumbnail track: " + list.size() + " previews");
+            // Fetch every sprite sheet now (a few hundred KB in all), so scrubbing never waits on the network.
+            java.util.LinkedHashSet<String> images = new java.util.LinkedHashSet<>();
+            for (Cue c : list) images.add(c.image);
+            for (String img : images) {
+                if (closed) return;
+                try {
+                    byte[] b = fetch(img);
+                    synchronized (sheets) { sheets.put(img, b); }
+                } catch (IOException e) {
+                    if (Debug.ON) Log.w(TAG, "sheet " + img + ": " + e.getMessage());
+                }
+            }
         } catch (Exception e) {
             trackFailed = true;
             cues = new ArrayList<>();

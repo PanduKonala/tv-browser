@@ -23,9 +23,13 @@ final class ScrubOverlay extends FrameLayout {
     private final ImageView[] tiles = new ImageView[TILES];
     private final TextView[] labels = new TextView[TILES];
     private final long[] shown = new long[TILES];
+    /** The picture each tile shows; tiles never share a Drawable (a shared one changes in both). */
+    private final android.graphics.Bitmap[] pics = new android.graphics.Bitmap[TILES];
     private final TextView time, delta;
     private final Bar bar;
     private final float density;
+    private final LinearLayout row;
+    private long lastCentre = -1;
 
     ScrubOverlay(Context c) {
         super(c);
@@ -41,7 +45,7 @@ final class ScrubOverlay extends FrameLayout {
         panel.setBackground(shade);
         panel.setPadding(dp(24), dp(40), dp(24), dp(18));
 
-        LinearLayout row = new LinearLayout(c);
+        row = new LinearLayout(c);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         int screenW = getResources().getDisplayMetrics().widthPixels;
@@ -111,6 +115,27 @@ final class ScrubOverlay extends FrameLayout {
         delta.setText((d >= 0 ? "+" : "−") + fmt(Math.abs(d)));
         bar.set(position, target, duration);
         long step = thumbs == null ? 10_000 : thumbs.interval();
+        // Moving one preview along: slide the strip by one tile, so it glides instead of jumping.
+        long centre = thumbs == null ? target / step : thumbs.bucket(target);
+        if (lastCentre >= 0 && Math.abs(centre - lastCentre) == step && getHeight() > 0) {
+            View a = (View) tiles[1].getParent(), b = (View) tiles[2].getParent();
+            float tile = (b.getLeft() + b.getWidth() / 2f) - (a.getLeft() + a.getWidth() / 2f);
+            row.animate().cancel();
+            // Pictures move with the strip: each tile takes its neighbour's, only the new edge loads.
+            boolean fwd = centre > lastCentre;
+            if (fwd) {
+                for (int i = 0; i < TILES - 1; i++) { pics[i] = pics[i + 1]; shown[i] = shown[i + 1]; }
+                pics[TILES - 1] = null; shown[TILES - 1] = -1;
+            } else {
+                for (int i = TILES - 1; i > 0; i--) { pics[i] = pics[i - 1]; shown[i] = shown[i - 1]; }
+                pics[0] = null; shown[0] = -1;
+            }
+            for (int i = 0; i < TILES; i++) tiles[i].setImageBitmap(pics[i]); // a fresh drawable per tile
+            row.setTranslationX(fwd ? tile : -tile);
+            row.animate().translationX(0).setDuration(160)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+        }
+        lastCentre = centre;
         for (int i = 0; i < TILES; i++) {
             final int idx = i;
             long t = target + (i - TILES / 2) * step;
@@ -123,16 +148,34 @@ final class ScrubOverlay extends FrameLayout {
             final long b = thumbs.bucket(t);
             if (shown[i] == b) continue;
             shown[i] = b;
-            tiles[i].setImageDrawable(null);
+            // Keep the old picture until the new one is ready, then cross-fade: no blank flashes.
             thumbs.get(t, i == TILES / 2, (bucket, bmp) -> {
-                if (shown[idx] == bucket) tiles[idx].setImageBitmap(bmp);
+                if (shown[idx] == bucket) fadeTo(idx, bmp);
             });
         }
     }
 
+    /** Cross-fade tile {@code i} to {@code bmp}; each layer is a new drawable owned by this tile only. */
+    private void fadeTo(int i, android.graphics.Bitmap bmp) {
+        android.graphics.Bitmap old = pics[i];
+        pics[i] = bmp;
+        if (old == bmp) return;
+        if (old == null || !isShown()) { tiles[i].setImageBitmap(bmp); return; }
+        android.graphics.drawable.TransitionDrawable td = new android.graphics.drawable.TransitionDrawable(
+                new android.graphics.drawable.Drawable[]{
+                        new android.graphics.drawable.BitmapDrawable(getResources(), old),
+                        new android.graphics.drawable.BitmapDrawable(getResources(), bmp)});
+        td.setCrossFadeEnabled(true);
+        tiles[i].setImageDrawable(td);
+        td.startTransition(140);
+    }
+
     void hide() {
         setVisibility(GONE);
-        for (int i = 0; i < TILES; i++) { shown[i] = -1; tiles[i].setImageDrawable(null); }
+        lastCentre = -1;
+        row.animate().cancel();
+        row.setTranslationX(0);
+        for (int i = 0; i < TILES; i++) { shown[i] = -1; pics[i] = null; tiles[i].setImageDrawable(null); }
     }
 
     static String fmt(long ms) {

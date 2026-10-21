@@ -76,6 +76,9 @@ public class PlayerActivity extends Activity {
     private boolean scrubbing, scrubWasPlaying;
     private long scrubStart, scrubTarget;
     private final Runnable commitScrub = this::commitScrub;
+    /** Scrub started on the controls' timeline: bring the controls back there afterwards. */
+    private boolean scrubFromTimeline;
+    private static final int ACCENT = 0xFFE50914; // red: visible on any picture, unlike the default white
 
     @Override
     protected void onCreate(Bundle state) {
@@ -88,6 +91,7 @@ public class PlayerActivity extends Activity {
         // Controls only when asked for (Up/Down, or OK to pause): auto-showing them on pause would
         // grab Left/Right away from scrubbing.
         view.setControllerAutoShow(false);
+        styleControls();
         FrameLayout root = new FrameLayout(this);
         root.addView(view);
         scrub = new ScrubOverlay(this);
@@ -384,6 +388,68 @@ public class PlayerActivity extends Activity {
         prefs.setSubtitleLanguage(f.language != null && !f.language.equals("und") ? f.language : "");
     }
 
+    // ---------------------------------------------------------------- controls look
+
+    /**
+     * Red focus highlight on every control (the default faint white ring is hard to see on a TV),
+     * and a red timeline that steps 1 s per key if it ever handles keys itself.
+     */
+    private void styleControls() {
+        View tb = view.findViewById(androidx.media3.ui.R.id.exo_progress);
+        if (tb instanceof androidx.media3.ui.DefaultTimeBar) {
+            androidx.media3.ui.DefaultTimeBar bar = (androidx.media3.ui.DefaultTimeBar) tb;
+            bar.setPlayedColor(ACCENT);
+            bar.setScrubberColor(ACCENT);
+            bar.setBufferedColor(0x80FFFFFF);
+            bar.setUnplayedColor(0x40FFFFFF);
+            bar.setKeyTimeIncrement(1000);
+        }
+        styleTree(view);
+    }
+
+    private void styleTree(View v) {
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) styleTree(g.getChildAt(i));
+        }
+        if (!v.isFocusable() || v instanceof android.view.ViewGroup) return;
+        int id = v.getId();
+        if (id == androidx.media3.ui.R.id.exo_rew_with_amount || id == androidx.media3.ui.R.id.exo_ffwd_with_amount) {
+            // "−5" / "+15": the button's own background is its icon, so the red disc goes on the
+            // frame around it (which takes the button's focused state).
+            View frame = (View) v.getParent();
+            frame.setBackground(focusDisc());
+            v.setOnFocusChangeListener((x, has) -> grow(frame, has));
+        } else if (v instanceof android.widget.ImageView) {
+            final boolean playPause = id == androidx.media3.ui.R.id.exo_play_pause;
+            // Play/pause is a white disc with the symbol cut out: a red disc behind it would fill the
+            // cut-out, so that one only gets its disc tinted red.
+            if (!playPause) v.setBackground(focusDisc());
+            v.setOnFocusChangeListener((x, has) -> {
+                grow(x, has);
+                // Play/pause draws its own white disc over the background: tint that red instead.
+                if (playPause) ((android.widget.ImageView) x).setImageTintList(has
+                        ? android.content.res.ColorStateList.valueOf(ACCENT) : null);
+            });
+        }
+    }
+
+    /** Red disc when focused, nothing otherwise. */
+    private static android.graphics.drawable.Drawable focusDisc() {
+        android.graphics.drawable.GradientDrawable on = new android.graphics.drawable.GradientDrawable();
+        on.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        on.setColor(ACCENT);
+        android.graphics.drawable.StateListDrawable sel = new android.graphics.drawable.StateListDrawable();
+        sel.addState(new int[]{android.R.attr.state_focused}, on);
+        sel.addState(new int[]{}, new android.graphics.drawable.ColorDrawable(0));
+        return sel;
+    }
+
+    /** The selected control grows a little, so it stands out even over a bright picture. */
+    private static void grow(View v, boolean focused) {
+        v.animate().scaleX(focused ? 1.25f : 1f).scaleY(focused ? 1.25f : 1f).setDuration(120).start();
+    }
+
     // ---------------------------------------------------------------- scrubbing
 
     /** Seconds per key event while held: a tap is exactly 1 s, holding speeds up to 30 s steps. */
@@ -405,6 +471,7 @@ public class PlayerActivity extends Activity {
             view.hideController();
             if (view.getSubtitleView() != null) view.getSubtitleView().setVisibility(View.INVISIBLE); // not behind the previews
             scrubStart = scrubTarget = player.getCurrentPosition();
+            if (thumbs != null) thumbs.preload(scrubStart, 8);
         }
         scrubTarget = Math.max(0, scrubTarget + delta);
         if (duration > 0) scrubTarget = Math.min(scrubTarget, duration - 1000);
@@ -424,6 +491,7 @@ public class PlayerActivity extends Activity {
         if (player == null) return;
         player.seekTo(scrubTarget);
         if (scrubWasPlaying) player.play();
+        backToTimeline();
     }
 
     /** Back while scrubbing: stay where we were. */
@@ -433,6 +501,15 @@ public class PlayerActivity extends Activity {
         scrub.hide();
         if (view.getSubtitleView() != null) view.getSubtitleView().setVisibility(View.VISIBLE);
         if (player != null && scrubWasPlaying) player.play();
+        backToTimeline();
+    }
+
+    private void backToTimeline() {
+        if (!scrubFromTimeline) return;
+        scrubFromTimeline = false;
+        view.showController();
+        View tb = view.findViewById(androidx.media3.ui.R.id.exo_progress);
+        if (tb != null) tb.requestFocus();
     }
 
     @Override
@@ -442,6 +519,17 @@ public class PlayerActivity extends Activity {
         if (Debug.ON && down) Log.i(TAG, "key " + KeyEvent.keyCodeToString(k) + " repeat=" + e.getRepeatCount() + " controls=" + view.isControllerFullyVisible());
         // Left/Right with the controls hidden (and FF/Rewind any time): scrub with previews.
         boolean panelOpen = subtitleMenu != null && subtitleMenu.isShowing();
+        // Left/Right on the controls' timeline scrub the same way (1 s steps, previews), instead of
+        // the timeline's own jumps of 5% of the video.
+        View focused = getCurrentFocus();
+        if (!panelOpen && focused != null && focused.getId() == androidx.media3.ui.R.id.exo_progress
+                && view.isControllerFullyVisible() && (k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT)) {
+            if (down) {
+                scrubFromTimeline = true;
+                scrubBy((k == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1) * stepFor(e.getRepeatCount()));
+            }
+            return true;
+        }
         if (!panelOpen && (k == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || k == KeyEvent.KEYCODE_MEDIA_REWIND
                 || (!view.isControllerFullyVisible() && (k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT)))) {
             if (down) {
