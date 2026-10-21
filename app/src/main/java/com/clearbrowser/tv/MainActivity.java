@@ -203,7 +203,8 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         resumed = false;
         if (Debug.ON) try { unregisterReceiver(testHold); } catch (IllegalArgumentException ignored) { }
         web.onPause();
-        web.pauseTimers();
+        // Behind the TV player the page may have to fetch for it (PagePipe): keep its scripts running.
+        if (!playerOpen) web.pauseTimers();
         if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
         prefs.addBlocked(unsaved.getAndSet(0));
         speed.save();
@@ -229,6 +230,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         w.setWebChromeClient(null);
         w.setWebViewClient(new WebViewClient());
         w.removeJavascriptInterface("ClearBridge");
+        PagePipe.clear();
         w.clearHistory();
         w.destroy();
     }
@@ -266,6 +268,8 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true); // embedded video players need them
 
+        // Lets the TV player download through the page when a server refuses it (see PagePipe).
+        PagePipe.install(web);
         web.addJavascriptInterface(new Bridge(new Bridge.Host() {
             @Override public boolean shieldsOn() { return shieldsOn; }
             @Override public boolean holdPreviews() { return !prefs.autoplay(); }
@@ -786,8 +790,14 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             if (!s.headers.containsKey("Referer")) s.headers.putString("Referer", playerOrigin + "/");
         }
         if (thumbnailsUrl != null) i.putExtra(PlayerActivity.EXTRA_THUMBS, thumbnailsUrl);
+        // The frame that can fetch for the TV player: where the stream was seen, else the playing frame.
+        String pipe = s.origin != null ? s.origin : playerOrigin;
+        if (pipe != null) i.putExtra(PlayerActivity.EXTRA_PIPE, pipe);
         startActivityForResult(i, REQ_PLAYER);
         playerOpen = true;
+        // The page may fetch for the TV player (PagePipe): don't let its renderer drop to "cached"
+        // when it's hidden, or the TV's Memory Shrinker kills it (adj 900 over ~100 MB) and the page reloads.
+        web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
         return true;
     }
 
@@ -796,6 +806,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         super.onActivityResult(req, result, data);
         if (req != REQ_PLAYER) return;
         playerOpen = false;
+        if (web != null) web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true);
         backFromPlayerAt = SystemClock.elapsedRealtime();
         if (data == null) return;
         if (result == RESULT_OK) {

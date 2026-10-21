@@ -50,7 +50,8 @@ import java.util.Map;
 @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
 public class PlayerActivity extends Activity {
     static final String EXTRA_URL = "url", EXTRA_HEADERS = "headers", EXTRA_POS = "pos", EXTRA_UA = "ua",
-            EXTRA_SUBS = "subs", EXTRA_ORIGIN = "origin", EXTRA_THUMBS = "thumbs";
+            EXTRA_SUBS = "subs", EXTRA_ORIGIN = "origin", EXTRA_THUMBS = "thumbs",
+            EXTRA_PIPE = "pipe";
     private static final String[] SIZES = {"Small", "Medium", "Large", "Extra large"};
     private static final float[] SIZE_SCALE = {0.8f, 1.0f, 1.3f, 1.65f};
     private static final String[] STYLES = {"White, outlined", "Yellow, outlined", "White on dark box", "Yellow on dark box"};
@@ -178,12 +179,15 @@ public class PlayerActivity extends Activity {
                 .setPrioritizeTimeOverSizeThresholds(false)
                 .build();
         player = new ExoPlayer.Builder(this)
-                // Playlists the page's player already received are read from its copy (see PageCopies).
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(new PageCopies.Factory(new androidx.media3.datasource.ResolvingDataSource.Factory(
-                        new DefaultDataSource.Factory(this, new ParallelHttpDataSource.Factory(http)),
-                        // Subtitle servers check where requests come from, like the page's player does.
-                        spec -> subtitleUris.contains(spec.uri.toString()) && !subtitleHeaders.isEmpty()
-                                ? spec.withAdditionalHeaders(subtitleHeaders) : spec))))
+                // Playlists the page's player already received are read from its copy (PageCopies);
+                // servers that refuse the TV player are asked through the page (PagePipe).
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(new PageCopies.Factory(new PagePipe.Factory(
+                        new androidx.media3.datasource.ResolvingDataSource.Factory(
+                                new DefaultDataSource.Factory(this, new ParallelHttpDataSource.Factory(http)),
+                                // Subtitle servers check where requests come from, like the page's player does.
+                                spec -> subtitleUris.contains(spec.uri.toString()) && !subtitleHeaders.isEmpty()
+                                        ? spec.withAdditionalHeaders(subtitleHeaders) : spec),
+                        in.getStringExtra(EXTRA_PIPE)))))
                 .setTrackSelector(selector)
                 .setLoadControl(load)
                 .build();
@@ -237,7 +241,10 @@ public class PlayerActivity extends Activity {
         MediaItem.Builder item = new MediaItem.Builder().setUri(Uri.parse(url));
         String path = Uri.parse(url).getPath();
         path = path == null ? "" : path.toLowerCase();
-        if (path.endsWith(".m3u8")) item.setMimeType(MimeTypes.APPLICATION_M3U8);
+        // The page's copy knows what it is even when the address doesn't say (/proxy?url=..., /pl?v=1).
+        String kind = PageCopies.mimeOf(Uri.parse(url));
+        if (kind != null) item.setMimeType(kind);
+        else if (path.endsWith(".m3u8")) item.setMimeType(MimeTypes.APPLICATION_M3U8);
         else if (path.endsWith(".mpd")) item.setMimeType(MimeTypes.APPLICATION_MPD);
         // Subtitle files the page offers: listed in our panel, fetched only when picked, drawn by us.
         Map<String, String> extHeaders = new HashMap<>(subtitleHeaders);

@@ -60,6 +60,15 @@ final class PageCopies {
 
     @Nullable private static Copy get(Uri uri) { return COPIES.get(uri.toString()); }
 
+    /** HLS or DASH, from the page's copy of {@code uri}; null if there's no copy. */
+    @Nullable static String mimeOf(Uri uri) {
+        Copy c = get(uri);
+        if (c == null) return null;
+        String head = new String(c.body, 0, Math.min(c.body.length, 512), StandardCharsets.UTF_8).trim();
+        if (head.startsWith("#EXTM3U")) return androidx.media3.common.MimeTypes.APPLICATION_M3U8;
+        return head.contains("<MPD") ? androidx.media3.common.MimeTypes.APPLICATION_MPD : null;
+    }
+
     /** Serves a page copy when there is one, else asks {@code upstream}. */
     static final class Factory implements DataSource.Factory {
         private final DataSource.Factory upstream;

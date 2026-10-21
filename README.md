@@ -36,7 +36,16 @@ Bookmarks button in the toolbar jumps to the bookmarks.
   stream is found by its content even when its address doesn't look like one (`/proxy?url=…`, no
   extension); the TV player takes the newest quality list from the frame whose video started, with
   the Origin/Referer that frame's player sends.
-- **Session-bound playlists**: the TV player starts from the page's copy of the playlist. Some embeds (enma.lol's tryembed server) keep the stream
+- **Through the page when refused**: when a server refuses the TV player (401/403), the frame that
+  plays the video downloads the bytes itself (its cookies, partitioned ones included, its Origin and
+  Referer, and the extra headers its own scripts add, such as session tokens) and passes them back as
+  ArrayBuffers over an androidx.webkit message channel; large files come in 4 MB ranged pieces. That
+  server stays on this route for the session. While the TV player is open the page keeps running
+  (no paused timers) and its renderer keeps an important priority, so the TV's Memory Shrinker
+  doesn't kill it. Tested against a server that refuses anything without the page's session header:
+  60 s at 720p, 0 stalls.
+- **Session-bound playlists**: the TV player starts from the page's copy of the playlist, and learns
+  its type (HLS/DASH) from the content when the address doesn't say. Some embeds (enma.lol's tryembed server) keep the stream
   session in partitioned cookies, which Android's CookieManager doesn't hand out, so asking the
   server again gets "403 Missing stream session". Only master and finished playlists are reused;
   live ones are fetched fresh.

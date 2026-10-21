@@ -92,6 +92,12 @@ final class Bridge {
     @JavascriptInterface
     public void playlist(String url, String finalUrl, String body, String frameOrigin) {
         if (body == null || !(body.startsWith("#EXTM3U") || body.contains("<MPD"))) return;
+        // A playlist the page built itself (decoded in script, handed to its player as a blob:):
+        // only our copy can answer for it, under an address of its own that never hits the network.
+        if (url != null && url.startsWith("blob:")) {
+            url = "https://blob.clear.invalid/" + android.net.Uri.encode(url);
+            finalUrl = null;
+        }
         PageCopies.put(url, finalUrl, body);
         boolean master = body.contains("#EXT-X-STREAM-INF") || body.contains("<MPD");
         host.onPlaylist(url, frameOrigin, master);

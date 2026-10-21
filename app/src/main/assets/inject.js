@@ -230,6 +230,54 @@
     };
   }
 
+  // Fetching for the TV player (PagePipe): when a server refuses the TV player, the frame that plays
+  // the video downloads the bytes itself, sending exactly what it always sends (its cookies, Origin,
+  // Referer), and passes them back as an ArrayBuffer. Large files come in ranged pieces.
+  var nativeFetch = window.fetch ? window.fetch.bind(window) : null;
+  // Headers the page's own scripts add to requests (players' tokens, X-Session-style keys), by server:
+  // fetching for the TV player sends them too.
+  var hostHeaders = {};
+  var noteHeader = function (url, k, v) {
+    if (/^(range|content-type|content-length|accept)$/i.test(k)) return;
+    try {
+      var h = new URL(url, location.href).host;
+      (hostHeaders[h] = hostHeaders[h] || {})[k] = v;
+    } catch (e) {}
+  };
+  var pipeReady = function () {
+    var P = window.ClearPipe;
+    if (!P || !nativeFetch || P.__clear) return !!P;
+    P.__clear = true;
+    P.onmessage = function (ev) {
+      var q;
+      try { q = JSON.parse(ev.data); } catch (e) { return; }
+      var head = function (h) { h.id = q.id; P.postMessage(JSON.stringify(h)); };
+      var get = function (cred) {
+        var o = { credentials: cred, cache: 'no-store', headers: {} };
+        try { Object.assign(o.headers, hostHeaders[new URL(q.url).host] || {}); } catch (e) {}
+        if (q.range) o.headers.Range = q.range;
+        return nativeFetch(q.url, o);
+      };
+      // Same-origin cookies first (what most players do); a server that wants cookies across sites
+      // must allow credentials, so try that if the first way fails.
+      get('same-origin').catch(function () { return get('include'); }).then(function (r) {
+        var len = +(r.headers.get('content-length') || 0);
+        if (r.status === 200 && q.range && len > 64 * 1048576) {
+          head({ status: 0, error: 'server ignores ranges on a large file' });
+          try { r.body.cancel(); } catch (e) {}
+          return;
+        }
+        return r.arrayBuffer().then(function (buf) {
+          head({ status: r.status, range: r.headers.get('content-range') || '', type: r.headers.get('content-type') || '' });
+          if (r.ok) P.postMessage(buf);
+        });
+      }).catch(function (e) { head({ status: 0, error: String((e && e.message) || e) }); });
+    };
+    P.postMessage('hi');
+    return true;
+  };
+  if (!pipeReady()) document.addEventListener('DOMContentLoaded', pipeReady);
+
   // Playlists the page's player receives go to the app too, so the TV player can start from the
   // same copy: some servers tie a playlist to a session only the page has (partitioned cookies).
   if (B.playlist) try {
@@ -245,13 +293,28 @@
       this.__clearUrl = String(u);
       return xOpen.apply(this, arguments);
     };
+    var xSet = XMLHttpRequest.prototype.setRequestHeader;
+    XMLHttpRequest.prototype.setRequestHeader = function (k, v) {
+      if (this.__clearUrl) noteHeader(this.__clearUrl, String(k), String(v));
+      return xSet.apply(this, arguments);
+    };
     var xSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.send = function () {
       var x = this;
       x.addEventListener('load', function () {
         try {
-          if (x.status !== 200 || (x.responseType && x.responseType !== 'text')) return;
-          if (!isList(x.__clearUrl) && !isList(x.responseURL) && !isListType(x.getResponseHeader('content-type'))) return;
+          if (x.status !== 200) return;
+          if (x.responseType === 'arraybuffer') {
+            // Custom loaders fetch playlists as bytes: look at the first ones, whatever the address.
+            var ab = x.response;
+            if (!ab || ab.byteLength > 2097152 || ab.byteLength < 7) return;
+            if (String.fromCharCode.apply(null, new Uint8Array(ab, 0, 7)) !== '#EXTM3U') return;
+            sendList(x.__clearUrl, x.responseURL, new TextDecoder().decode(ab));
+            return;
+          }
+          if (x.responseType && x.responseType !== 'text') return;
+          if (!isList(x.__clearUrl) && !isList(x.responseURL) && !isListType(x.getResponseHeader('content-type'))
+              && String(x.responseText).slice(0, 7) !== '#EXTM3U') return;
           sendList(x.__clearUrl, x.responseURL, x.responseText);
         } catch (e) {}
       });
@@ -262,6 +325,8 @@
       var p = realFetch.apply(this, arguments);
       try {
         var url = typeof input === 'string' ? input : (input && input.url) || String(input);
+        var init = arguments[1];
+        if (init && init.headers) new Headers(init.headers).forEach(function (v, k) { noteHeader(url, k, v); });
         p.then(function (r) {
           if (!r.ok || !(isList(url) || isList(r.url) || isListType(r.headers.get('content-type')))) return;
           r.clone().text().then(function (t) { sendList(url, r.url, t); }, function () {});
