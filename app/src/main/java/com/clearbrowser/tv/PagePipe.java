@@ -59,7 +59,10 @@ final class PagePipe {
 
     private static final class Pending {
         final CompletableFuture<Answer> done = new CompletableFuture<>();
+        /** The frame we asked: only it may answer (any frame can post to us, ads included). */
+        final JavaScriptReplyProxy frame;
         Answer head;
+        Pending(JavaScriptReplyProxy frame) { this.frame = frame; }
     }
 
     private static final class Answer {
@@ -101,8 +104,9 @@ final class PagePipe {
     private static void onMessage(WebMessageCompat m, Uri sourceOrigin, JavaScriptReplyProxy reply) {
         if (m.getType() == WebMessageCompat.TYPE_ARRAY_BUFFER) {
             Integer id = AWAITING_BODY.remove(reply);
-            Pending p = id == null ? null : PENDING.remove(id);
-            if (p == null || p.head == null) return;
+            Pending p = id == null ? null : PENDING.get(id);
+            if (p == null || p.head == null || p.frame != reply) return;
+            PENDING.remove(id);
             p.head.body = m.getArrayBuffer();
             p.done.complete(p.head);
             return;
@@ -117,7 +121,7 @@ final class PagePipe {
         try {
             JSONObject o = new JSONObject(data);
             Pending p = PENDING.get(o.getInt("id"));
-            if (p == null) return;
+            if (p == null || p.frame != reply) return; // not the frame we asked
             Answer a = new Answer();
             a.status = o.optInt("status");
             a.error = o.optString("error", null);
@@ -151,7 +155,7 @@ final class PagePipe {
         JavaScriptReplyProxy frame = FRAMES.get(norm(origin));
         if (frame == null) throw new IOException("no frame from " + origin + " to fetch through");
         int id = IDS.incrementAndGet();
-        Pending p = new Pending();
+        Pending p = new Pending(frame);
         PENDING.put(id, p);
         String range = from <= 0 && to < 0 ? "" : "bytes=" + from + "-" + (to >= 0 ? to : "");
         String ask;

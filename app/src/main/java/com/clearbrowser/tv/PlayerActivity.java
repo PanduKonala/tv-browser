@@ -184,7 +184,7 @@ public class PlayerActivity extends Activity {
         player = new ExoPlayer.Builder(this)
                 // Playlists the page's player already received are read from its copy (PageCopies);
                 // servers that refuse the TV player are asked through the page (PagePipe).
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(new PageCopies.Factory(new PagePipe.Factory(
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(new PageCopies.Factory(in.getStringExtra(EXTRA_PIPE), new PagePipe.Factory(
                         new androidx.media3.datasource.ResolvingDataSource.Factory(
                                 new DefaultDataSource.Factory(this, new ParallelHttpDataSource.Factory(http)),
                                 // Subtitle servers check where requests come from, like the page's player does.
@@ -245,7 +245,7 @@ public class PlayerActivity extends Activity {
         String path = Uri.parse(url).getPath();
         path = path == null ? "" : path.toLowerCase();
         // The page's copy knows what it is even when the address doesn't say (/proxy?url=..., /pl?v=1).
-        String kind = PageCopies.mimeOf(Uri.parse(url));
+        String kind = PageCopies.mimeOf(Uri.parse(url), in.getStringExtra(EXTRA_PIPE));
         if (kind != null) item.setMimeType(kind);
         else if (path.endsWith(".m3u8")) item.setMimeType(MimeTypes.APPLICATION_M3U8);
         else if (path.endsWith(".mpd")) item.setMimeType(MimeTypes.APPLICATION_MPD);

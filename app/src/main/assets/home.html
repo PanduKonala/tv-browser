@@ -139,6 +139,8 @@
     }
     return d;
   }
+  // Only web addresses become links (a stored javascript: or file: address must never run here).
+  function web(u) { return /^https?:\/\//i.test(u || ''); }
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; }
 
   // Called by the app once the page has loaded, and again after a change.
@@ -150,7 +152,7 @@
       tiles.innerHTML = '';
       data.bookmarks.forEach(function (b) {
         var t = el('div', 'tile'), a = el('a');
-        a.href = b.u; a.appendChild(icon(b)); a.appendChild(el('b', '', b.t));
+        if (web(b.u)) a.href = b.u; a.appendChild(icon(b)); a.appendChild(el('b', '', b.t));
         var x = el('button', 'x', '×'); x.title = 'Remove';
         x.onclick = function (e) { e.preventDefault(); ClearBridge.removeBookmark(b.u); };
         t.appendChild(a); t.appendChild(x); tiles.appendChild(t);
@@ -161,7 +163,7 @@
     if (data.recent.length) {
       row.innerHTML = '';
       data.recent.forEach(function (r) {
-        var a = el('a', 'card'); a.href = r.u;
+        var a = el('a', 'card'); if (web(r.u)) a.href = r.u;
         var m = el('div', 'm'); m.appendChild(el('b', '', r.t)); m.appendChild(el('span', '', host(r.u)));
         a.appendChild(icon(r)); a.appendChild(m); row.appendChild(a);
       });

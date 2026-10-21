@@ -98,7 +98,7 @@ final class Bridge {
             url = "https://blob.clear.invalid/" + android.net.Uri.encode(url);
             finalUrl = null;
         }
-        PageCopies.put(url, finalUrl, body);
+        PageCopies.put(url, finalUrl, body, frameOrigin);
         boolean master = body.contains("#EXT-X-STREAM-INF") || body.contains("<MPD");
         host.onPlaylist(url, frameOrigin, master);
     }

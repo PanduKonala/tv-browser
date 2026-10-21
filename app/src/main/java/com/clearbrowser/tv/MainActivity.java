@@ -161,7 +161,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         wireToolbar();
         createWebView();
 
-        Uri data = getIntent().getData();
+        Uri data = webAddress(getIntent());
         if (state != null) web.restoreState(state);
         if (state == null || web.getUrl() == null) load(data != null ? data.toString() : prefs.home());
     }
@@ -169,7 +169,20 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        if (intent.getData() != null) load(intent.getData().toString());
+        Uri data = webAddress(intent);
+        if (data != null) load(data.toString());
+    }
+
+    /**
+     * The http(s) address another app asks us to open, or null. Apps can name this activity directly
+     * and skip the manifest's http/https filter: a javascript: address would run in whatever site is
+     * open, a file: one would reach for local files.
+     */
+    @androidx.annotation.Nullable
+    private static Uri webAddress(Intent intent) {
+        Uri u = intent == null ? null : intent.getData();
+        String scheme = u == null || u.getScheme() == null ? "" : u.getScheme().toLowerCase(Locale.US);
+        return scheme.equals("http") || scheme.equals("https") ? u : null;
     }
 
     @Override
@@ -188,8 +201,9 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         if (Debug.ON) {
             // adb shell am broadcast -a com.clearbrowser.tv.TEST_HOLD --es dir down --ei ms 6000
             IntentFilter f = new IntentFilter("com.clearbrowser.tv.TEST_HOLD");
-            if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(testHold, f, RECEIVER_EXPORTED);
-            else registerReceiver(testHold, f);
+            // Only adb may send it: the shell holds DUMP, ordinary apps can't.
+            if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(testHold, f, android.Manifest.permission.DUMP, null, RECEIVER_EXPORTED);
+            else registerReceiver(testHold, f, android.Manifest.permission.DUMP, null);
         }
         // Fresh block lists when due, a little after opening, and never while a video is playing
         // in the TV player (this activity is paused then).
@@ -383,7 +397,8 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             Uri u = req.getUrl();
             String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase(Locale.US);
             if (!scheme.equals("http") && !scheme.equals("https")) {
-                if (scheme.equals("about") || scheme.equals("data") || scheme.equals("blob") || scheme.equals("file")) return false;
+                if (scheme.equals("about") || scheme.equals("data") || scheme.equals("blob")) return false;
+                if (scheme.equals("file")) return !Prefs.isHome(u.toString()); // our home page, nothing else on disk
                 // intent://, market:// and friends: ads use them to throw you into an app store.
                 if (shieldsOn) blocked("app link", scheme + ":");
                 return true;
@@ -683,6 +698,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         Map<String, String> h = req.getRequestHeaders();
         boolean ranged = h != null && (h.containsKey("Range") || h.containsKey("range"));
         if (!isStreamPath(req.getUrl().getPath(), ranged)) return;
+        if (!mayStream(req.getUrl().getHost())) return;
         String url = req.getUrl().toString();
         synchronized (streams) {
             for (Stream s : streams) if (s.url.equals(url)) return;
@@ -706,7 +722,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
      * just learn their frame; new ones get the headers that frame's player sends.
      */
     private void notePlaylist(String url, String frameOrigin, boolean master) {
-        if (url == null || !url.startsWith("http")) return;
+        if (url == null || !url.startsWith("http") || !mayStream(Uri.parse(url).getHost())) return;
         String origin = frameOrigin != null && frameOrigin.startsWith("http") ? frameOrigin : null;
         synchronized (streams) {
             for (Stream s : streams) if (s.url.equals(url)) { s.origin = origin; s.master = master; return; }
@@ -728,13 +744,22 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     }
 
     /**
+     * The TV player downloads natively, without the browser's guard against public pages reaching
+     * into the home network (Private Network Access). So a stream on a local address (router, NAS,
+     * the TV itself) is only taken when the page being shown is on the local network too.
+     */
+    private boolean mayStream(String host) {
+        return !Net.isLocal(host) || Net.isLocal(topHost);
+    }
+
+    /**
      * The stream behind the video that's playing: the newest quality list the playing frame's
      * player received, else the first manifest requested around when it started (later ones are
      * its per-quality playlists), else the first one on the page.
      */
     private Stream currentStream() {
         String src = playingSrc;
-        if (src != null && src.startsWith("http") && !nativeFailed.contains(src)) {
+        if (src != null && src.startsWith("http") && !nativeFailed.contains(src) && mayStream(Uri.parse(src).getHost())) {
             // File players tell us exactly what they play. If its address redirected, the player is
             // now fetching the final address from the same server: that's the newest request there.
             String host = Uri.parse(src).getHost();

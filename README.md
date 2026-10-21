@@ -122,6 +122,31 @@ HTTPS and compiles them on the TV (`FilterCompiler`, a byte-identical port of
 in at once. Any failure keeps the current lists and retries in an hour. Never runs while the TV
 player is on screen. ⋮ → "Update ad-block lists now" forces it.
 
+## Security
+
+Every page, and every ad frame inside it, is treated as hostile. What a page can and can't make
+the browser do:
+
+- **Engine updates**: pages run in the system WebView (Chromium, sandboxed renderer). Its security
+  fixes come through the Play Store; keep that enabled (checked 2026-10-21: WebView 155 on both TVs).
+- **No reach outside the web**: no `intent://`/`market://` app launches, no downloads, no camera,
+  microphone or location, no file or content access (`file:` only for our own home page), no
+  WebView remote debugging. Certificate errors cancel the load (there is no "proceed anyway").
+- **Other apps** can open http/https addresses in the browser and nothing else: a `javascript:`
+  or `file:` address sent to it is ignored. The TV player isn't exported.
+- **Home network**: the TV player downloads natively, outside the browser's Private Network Access
+  guard, so it never takes a stream on a local address (router, NAS, the TV) unless the page itself
+  is on the local network.
+- **The JavaScript bridge** (every frame has it) only offers harmless calls: hiding rules for a
+  host, link prefetch within the site being shown, video events. Home-page actions (remove
+  bookmark, clear recents) work only while our home page is shown, and it renders site titles as
+  text and makes only http/https links.
+- **Playlist copies** belong to the frame that received them, and the TV player reads only the
+  playing frame's copies, so an ad frame can't swap the stream; all copies stay under 8 MB.
+- **The page pipe** asks one frame to fetch and accepts the answer only from that frame.
+- **The debug test hook** (TEST_HOLD, only with test logging on) accepts broadcasts from adb only
+  (it requires the DUMP permission, which apps can't hold).
+
 ## Test logging
 
 Off by default. `adb shell setprop log.tag.Clear DEBUG` and restart the app to get per-page timing
