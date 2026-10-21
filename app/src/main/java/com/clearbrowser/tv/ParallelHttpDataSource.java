@@ -135,8 +135,15 @@ final class ParallelHttpDataSource implements DataSource {
             first.close();
         }
         if (total < 0) {
-            // No range support: one plain stream for the whole thing.
-            Log.i("ClearDL", host + ": no byte ranges, single connection");
+            // No range support: one plain stream for the whole thing, and for the rest of this host's
+            // files (asking for a range first cost every video segment an extra request). Not judged on
+            // playlists: servers often make those on the fly without ranges but range their video files.
+            String type = "";
+            if (headers != null) for (Map.Entry<String, List<String>> h : headers.entrySet())
+                if ("content-type".equalsIgnoreCase(h.getKey()) && !h.getValue().isEmpty()) type = h.getValue().get(0).toLowerCase();
+            boolean playlist = type.matches(".*(mpegurl|dash\\+xml|text|json).*");
+            if (playlist) Log.i("ClearDL", host + ": no byte ranges for a playlist, single connection");
+            else if (SINGLE.add(host)) Log.i("ClearDL", host + ": no byte ranges, single connection from now on");
             single = newUpstream();
             long n = single.open(dataSpec);
             headers = single.getResponseHeaders();

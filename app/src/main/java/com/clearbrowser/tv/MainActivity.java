@@ -126,6 +126,8 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     private boolean resumed;
     /** When we last returned from the TV player, so a page that resumes playing doesn't bounce us straight back. */
     private long backFromPlayerAt;
+    /** The TV player is in front: the page's video stays paused behind it. */
+    private boolean playerOpen;
     private boolean centerDown, centerLong;
     private AlertDialog dialog;
     /** Keeps Wi-Fi out of power-save while the browser is open: power-save naps are a classic cause of video stalls. */
@@ -286,6 +288,8 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                 ui.postDelayed(() -> {
                     if (!prefs.tvPlayer() || customView != null || isFinishing()) return;
                     if (SystemClock.elapsedRealtime() - backFromPlayerAt < 4000) return; // just came back
+                    // Some page players restart themselves in the background (enma's did): no second TV player.
+                    if (playerOpen) { media("'pause'"); return; }
                     if (playInTvPlayer()) notice("Playing in the TV player · Back returns to the page");
                 }, 700);
             }
@@ -719,6 +723,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     }
 
     private boolean playInTvPlayer() {
+        if (playerOpen) { media("'pause'"); return true; }
         Stream s = currentStream();
         if (s == null) return false;
         media("'pause'");
@@ -737,6 +742,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         }
         if (thumbnailsUrl != null) i.putExtra(PlayerActivity.EXTRA_THUMBS, thumbnailsUrl);
         startActivityForResult(i, REQ_PLAYER);
+        playerOpen = true;
         return true;
     }
 
@@ -744,6 +750,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     protected void onActivityResult(int req, int result, Intent data) {
         super.onActivityResult(req, result, data);
         if (req != REQ_PLAYER) return;
+        playerOpen = false;
         backFromPlayerAt = SystemClock.elapsedRealtime();
         if (data == null) return;
         if (result == RESULT_OK) {

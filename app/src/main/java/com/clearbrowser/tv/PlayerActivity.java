@@ -178,11 +178,12 @@ public class PlayerActivity extends Activity {
                 .setPrioritizeTimeOverSizeThresholds(false)
                 .build();
         player = new ExoPlayer.Builder(this)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(new androidx.media3.datasource.ResolvingDataSource.Factory(
+                // Playlists the page's player already received are read from its copy (see PageCopies).
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(new PageCopies.Factory(new androidx.media3.datasource.ResolvingDataSource.Factory(
                         new DefaultDataSource.Factory(this, new ParallelHttpDataSource.Factory(http)),
                         // Subtitle servers check where requests come from, like the page's player does.
                         spec -> subtitleUris.contains(spec.uri.toString()) && !subtitleHeaders.isEmpty()
-                                ? spec.withAdditionalHeaders(subtitleHeaders) : spec)))
+                                ? spec.withAdditionalHeaders(subtitleHeaders) : spec))))
                 .setTrackSelector(selector)
                 .setLoadControl(load)
                 .build();

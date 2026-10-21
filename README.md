@@ -30,6 +30,13 @@ Bookmarks button in the toolbar jumps to the bookmarks.
   audio plays: the in-page player can't decode E-AC-3/AC-3 (common in .mkv files) and stays
   silent, while the TV player hands it to the TV's decoder. Measured on a 27-min 1080p .mkv:
   in-page 16 stalls in 21 s, 10 % dropped frames, no sound; TV player 0 stalls, 0 dropped, E-AC-3 sound.
+  While the TV player is open, a page player that restarts itself behind it is paused again
+  (no second TV player).
+- **Session-bound playlists**: the page's player passes each playlist it receives to the app, and
+  the TV player starts from that copy. Some embeds (enma.lol's tryembed server) keep the stream
+  session in partitioned cookies, which Android's CookieManager doesn't hand out, so asking the
+  server again gets "403 Missing stream session". Only master and finished playlists are reused;
+  live ones are fetched fresh.
 - **TV player, on fullscreen**: when a site's player goes fullscreen, the stream it was playing (HLS `.m3u8`,
   DASH `.mpd`, or a video file) opens in a built-in ExoPlayer with the page's headers, cookies
   and position. Video goes straight to the TV's hardware video plane instead of being composited
@@ -42,7 +49,7 @@ Bookmarks button in the toolbar jumps to the bookmarks.
   large), style (white/yellow, outlined or on a dark box), position (bottom/raised). Choices carry over.
 - **Parallel downloads** (TV player): each segment is fetched as byte ranges over up to 32
   connections. Per host it starts at 8 and doubles after clean downloads; a failed piece is retried
-  and halves the count (down to 1); servers without range support get one plain stream; at most
+  and halves the count (down to 1); servers without range support get one plain stream (remembered per server, so video segments don't each pay an extra request); at most
   16 MB is in flight. A refused piece (403/416/429/503, i.e. rate limiting) switches the rest of
   the download to one continuous connection from that byte, and the host stays single-stream.
 - **Seeking** (TV player, controls hidden): a Left/Right tap moves exactly 1 s; holding speeds up

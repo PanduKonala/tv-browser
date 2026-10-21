@@ -86,6 +86,12 @@ final class Bridge {
         host.onVideoStarted(position, subtitlesJson, src, frameOrigin);
     }
 
+    /** A playlist the page's player just received (requested address, final address, text). */
+    @JavascriptInterface
+    public void playlist(String url, String finalUrl, String body) {
+        PageCopies.put(url, finalUrl, body);
+    }
+
     @JavascriptInterface
     public void video(String event, double position) {
         host.onVideo(event, position);

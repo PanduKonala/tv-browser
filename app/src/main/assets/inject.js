@@ -229,6 +229,47 @@
     };
   }
 
+  // Playlists the page's player receives go to the app too, so the TV player can start from the
+  // same copy: some servers tie a playlist to a session only the page has (partitioned cookies).
+  if (B.playlist) try {
+    var isList = function (u) { return /\.(m3u8|mpd)(\?|#|$)/i.test(u); };
+    var isListType = function (t) { return /mpegurl|dash\+xml/i.test(t || ''); };
+    var sendList = function (url, finalUrl, text) {
+      if (typeof text !== 'string' || text.length > 2097152) return;
+      if (!/^\s*#EXTM3U|<MPD/.test(text.slice(0, 2048))) return;
+      try { B.playlist(new URL(url, location.href).href, finalUrl || '', text); } catch (e) {}
+    };
+    var xOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (m, u) {
+      this.__clearUrl = String(u);
+      return xOpen.apply(this, arguments);
+    };
+    var xSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function () {
+      var x = this;
+      x.addEventListener('load', function () {
+        try {
+          if (x.status !== 200 || (x.responseType && x.responseType !== 'text')) return;
+          if (!isList(x.__clearUrl) && !isList(x.responseURL) && !isListType(x.getResponseHeader('content-type'))) return;
+          sendList(x.__clearUrl, x.responseURL, x.responseText);
+        } catch (e) {}
+      });
+      return xSend.apply(this, arguments);
+    };
+    var realFetch = window.fetch;
+    if (realFetch) window.fetch = function (input) {
+      var p = realFetch.apply(this, arguments);
+      try {
+        var url = typeof input === 'string' ? input : (input && input.url) || String(input);
+        p.then(function (r) {
+          if (!r.ok || !(isList(url) || isList(r.url) || isListType(r.headers.get('content-type')))) return;
+          r.clone().text().then(function (t) { sendList(url, r.url, t); }, function () {});
+        }, function () {});
+      } catch (e) {}
+      return p;
+    };
+  } catch (e) {}
+
   // Muted autoplay is how sites run hover previews and hero trailers while you're only browsing;
   // each one decodes video and holds GPU memory (about 16 MB on one Netflix-style page here). A
   // muted video plays only when a click in this frame just happened (the user pressed play), and
