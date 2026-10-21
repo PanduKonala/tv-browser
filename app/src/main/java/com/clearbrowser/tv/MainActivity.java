@@ -283,7 +283,14 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true); // embedded video players need them
 
         // Lets the TV player download through the page when a server refuses it (see PagePipe).
-        PagePipe.install(web);
+        PagePipe.install(web, new PagePipe.Reports() {
+            @Override public void playlist(String url, String finalUrl, String body, String origin) {
+                onPagePlaylist(url, finalUrl, body, origin);
+            }
+            @Override public void started(double position, String subtitlesJson, String src, String origin) {
+                onVideoStarted(position, subtitlesJson, src, origin);
+            }
+        });
         web.addJavascriptInterface(new Bridge(new Bridge.Host() {
             @Override public boolean shieldsOn() { return shieldsOn; }
             @Override public boolean holdPreviews() { return !prefs.autoplay(); }
@@ -292,30 +299,6 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             @Override public void onVideo(String event, double position) {
                 videoPos = position;
                 if ("playing".equals(event)) playingAt = SystemClock.elapsedRealtime();
-            }
-            @Override public void onVideoStarted(double position, String subtitlesJson, String src, String frameOrigin) {
-                videoPos = position;
-                playingSrc = src;
-                playerOrigin = frameOrigin != null && frameOrigin.startsWith("http") ? frameOrigin : null;
-                try {
-                    org.json.JSONArray a = new org.json.JSONArray(subtitlesJson == null ? "[]" : subtitlesJson);
-                    for (int i = 0; i < a.length(); i++) {
-                        JSONObject o = a.getJSONObject(i);
-                        noteSubtitle(o.optString("src"), o.optString("label"), o.optString("lang"), o.optString("type"));
-                    }
-                } catch (JSONException ignored) { }
-                // Give the stream's own request a moment to be seen, then move it to the TV player:
-                // smooth 1080p and Dolby audio (which the in-page player can't decode).
-                ui.postDelayed(() -> {
-                    if (!prefs.tvPlayer() || customView != null || isFinishing()) return;
-                    if (SystemClock.elapsedRealtime() - backFromPlayerAt < 4000) return; // just came back
-                    // Some page players restart themselves in the background (enma's did): no second TV player.
-                    if (playerOpen) { media("'pause'"); return; }
-                    if (playInTvPlayer()) notice("Playing in the TV player · Back returns to the page");
-                }, 700);
-            }
-            @Override public void onPlaylist(String url, String frameOrigin, boolean master) {
-                notePlaylist(url, frameOrigin, master);
             }
             @Override public void removeBookmark(String url) {
                 ui.post(() -> {
@@ -695,6 +678,8 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             noteSubtitle(req.getUrl().toString(), null, null);
             return;
         }
+        // Only real fetches: a CORS preflight (OPTIONS) carries the preflight's headers, not the player's.
+        if (!"GET".equalsIgnoreCase(req.getMethod())) return;
         Map<String, String> h = req.getRequestHeaders();
         boolean ranged = h != null && (h.containsKey("Range") || h.containsKey("range"));
         if (!isStreamPath(req.getUrl().getPath(), ranged)) return;
@@ -716,16 +701,58 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         }
     }
 
+    /** A frame's video with sound started (reported over PagePipe, so {@code frameOrigin} is WebView's word). */
+    private void onVideoStarted(double position, String subtitlesJson, String src, String frameOrigin) {
+        videoPos = position;
+        playingSrc = src;
+        playerOrigin = frameOrigin != null && frameOrigin.startsWith("http") ? frameOrigin : null;
+        try {
+            org.json.JSONArray a = new org.json.JSONArray(subtitlesJson == null ? "[]" : subtitlesJson);
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.getJSONObject(i);
+                noteSubtitle(o.optString("src"), o.optString("label"), o.optString("lang"), o.optString("type"));
+            }
+        } catch (JSONException ignored) { }
+        // Give the stream's own request a moment to be seen, then move it to the TV player:
+        // smooth 1080p and Dolby audio (which the in-page player can't decode).
+        ui.postDelayed(() -> {
+            if (!prefs.tvPlayer() || customView != null || isFinishing()) return;
+            if (SystemClock.elapsedRealtime() - backFromPlayerAt < 4000) return; // just came back
+            // Some page players restart themselves in the background (enma's did): no second TV player.
+            if (playerOpen) { media("'pause'"); return; }
+            if (playInTvPlayer()) notice("Playing in the TV player · Back returns to the page");
+        }, 700);
+    }
+
+    /** A frame's player received a playlist (over PagePipe: {@code frameOrigin} is WebView's word). */
+    private void onPagePlaylist(String url, String finalUrl, String body, String frameOrigin) {
+        if (body == null || !(body.startsWith("#EXTM3U") || body.contains("<MPD"))) return;
+        // A playlist the page built itself (decoded in script, handed to its player as a blob:):
+        // only our copy can answer for it, under an address of its own that never hits the network.
+        if (url != null && url.startsWith("blob:")) {
+            url = "https://blob.clear.invalid/" + Uri.encode(url);
+            finalUrl = null;
+        }
+        PageCopies.put(url, finalUrl, body, frameOrigin);
+        notePlaylist(url, frameOrigin, body.contains("#EXT-X-STREAM-INF") || body.contains("<MPD"));
+    }
+
     /**
      * A playlist a frame's player received, whatever its address looks like (some sites serve them
      * from /proxy?url=... or without an extension, which noteStream can't recognise). Known ones
-     * just learn their frame; new ones get the headers that frame's player sends.
+     * learn their frame (once); new ones get the headers that frame's player sends.
      */
     private void notePlaylist(String url, String frameOrigin, boolean master) {
         if (url == null || !url.startsWith("http") || !mayStream(Uri.parse(url).getHost())) return;
         String origin = frameOrigin != null && frameOrigin.startsWith("http") ? frameOrigin : null;
         synchronized (streams) {
-            for (Stream s : streams) if (s.url.equals(url)) { s.origin = origin; s.master = master; return; }
+            // A frame can only describe its own streams: an entry another frame already owns stays
+            // theirs (an ad frame claiming the player's address gets an entry of its own instead).
+            for (Stream s : streams) {
+                if (!s.url.equals(url)) continue;
+                if (s.origin == null) { s.origin = origin; s.master = master; return; }
+                if (s.origin.equals(origin)) { s.master = master; return; }
+            }
             Bundle b = new Bundle();
             if (origin != null) {
                 b.putString("Referer", origin + "/");
@@ -818,6 +845,8 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         // The frame that can fetch for the TV player: where the stream was seen, else the playing frame.
         String pipe = s.origin != null ? s.origin : playerOrigin;
         if (pipe != null) i.putExtra(PlayerActivity.EXTRA_PIPE, pipe);
+        // Local-network addresses only for a page that is itself on the local network (SafeHttp).
+        i.putExtra(PlayerActivity.EXTRA_LOCAL_OK, Net.isLocal(topHost));
         startActivityForResult(i, REQ_PLAYER);
         playerOpen = true;
         // The page may fetch for the TV player (PagePipe): don't let its renderer drop to "cached"

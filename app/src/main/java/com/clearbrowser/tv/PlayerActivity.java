@@ -24,7 +24,6 @@ import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 import androidx.media3.datasource.DefaultDataSource;
-import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.DecoderReuseEvaluation;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.ExoPlayer;
@@ -51,7 +50,7 @@ import java.util.Map;
 public class PlayerActivity extends Activity {
     static final String EXTRA_URL = "url", EXTRA_HEADERS = "headers", EXTRA_POS = "pos", EXTRA_UA = "ua",
             EXTRA_SUBS = "subs", EXTRA_ORIGIN = "origin", EXTRA_THUMBS = "thumbs",
-            EXTRA_PIPE = "pipe";
+            EXTRA_PIPE = "pipe", EXTRA_LOCAL_OK = "localOk";
     private static final String[] SIZES = {"Small", "Medium", "Large", "Extra large"};
     private static final float[] SIZE_SCALE = {0.8f, 1.0f, 1.3f, 1.65f};
     private static final String[] STYLES = {"White, outlined", "Yellow, outlined", "White on dark box", "Yellow on dark box"};
@@ -157,14 +156,14 @@ public class PlayerActivity extends Activity {
             subtitleHeaders.put("Sec-Fetch-Site", "cross-site");
             subtitleHeaders.put("Sec-Fetch-Dest", "empty");
         }
-        thumbs = new Thumbnails(in.getStringExtra(EXTRA_THUMBS), url, thumbHeaders);
+        boolean localOk = in.getBooleanExtra(EXTRA_LOCAL_OK, false);
+        thumbs = new Thumbnails(in.getStringExtra(EXTRA_THUMBS), url, thumbHeaders, localOk);
 
-        DefaultHttpDataSource.Factory http = new DefaultHttpDataSource.Factory()
-                .setUserAgent(in.getStringExtra(EXTRA_UA))
-                .setDefaultRequestProperties(headers)
-                .setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(15000)
-                .setReadTimeoutMs(15000);
+        // SafeHttp: no local-network addresses unless the page is on the local network.
+        androidx.media3.datasource.okhttp.OkHttpDataSource.Factory http =
+                new androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(SafeHttp.client(localOk))
+                        .setUserAgent(in.getStringExtra(EXTRA_UA))
+                        .setDefaultRequestProperties(headers);
         // Up to 1080p / 60 fps, whatever the screen's UI resolution; within that, ExoPlayer adapts to the connection.
         selector = new DefaultTrackSelector(this);
         // Tunneled playback when the TV's decoder supports it (these TCL/MediaTek ones do): the video
@@ -252,7 +251,7 @@ public class PlayerActivity extends Activity {
         // Subtitle files the page offers: listed in our panel, fetched only when picked, drawn by us.
         Map<String, String> extHeaders = new HashMap<>(subtitleHeaders);
         extHeaders.put("User-Agent", in.getStringExtra(EXTRA_UA));
-        ext = new ExternalSubs(extHeaders);
+        ext = new ExternalSubs(extHeaders, in.getBooleanExtra(EXTRA_LOCAL_OK, false));
         ArrayList<Bundle> subs = in.getParcelableArrayListExtra(EXTRA_SUBS);
         if (subs != null) for (Bundle b : subs) {
             ext.add(b.getString("url", ""), b.getString("label", ""), b.getString("lang", ""), b.getString("type", ""));

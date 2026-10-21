@@ -244,10 +244,14 @@
       (hostHeaders[h] = hostHeaders[h] || {})[k] = v;
     } catch (e) {}
   };
+  // Reports about this frame's video go over the pipe too: there WebView tells the app which frame
+  // sent them (the JS bridge can't, so a frame could claim to be another).
+  var pipePost = null;
   var pipeReady = function () {
     var P = window.ClearPipe;
     if (!P || !nativeFetch || P.__clear) return !!P;
     P.__clear = true;
+    pipePost = function (o) { try { P.postMessage(JSON.stringify(o)); } catch (e) {} };
     P.onmessage = function (ev) {
       var q;
       try { q = JSON.parse(ev.data); } catch (e) { return; }
@@ -280,13 +284,14 @@
 
   // Playlists the page's player receives go to the app too, so the TV player can start from the
   // same copy: some servers tie a playlist to a session only the page has (partitioned cookies).
-  if (B.playlist) try {
+  try {
     var isList = function (u) { return /\.(m3u8|mpd)(\?|#|$)/i.test(u); };
     var isListType = function (t) { return /mpegurl|dash\+xml/i.test(t || ''); };
     var sendList = function (url, finalUrl, text) {
       if (typeof text !== 'string' || text.length > 2097152) return;
       if (!/^\s*#EXTM3U|<MPD/.test(text.slice(0, 2048))) return;
-      try { B.playlist(new URL(url, location.href).href, finalUrl || '', text, location.origin); } catch (e) {}
+      if (!pipePost) return;
+      try { pipePost({ t: 'pl', url: new URL(url, location.href).href, fin: finalUrl || '', body: text }); } catch (e) {}
     };
     var xOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function (m, u) {
@@ -571,7 +576,7 @@
     if (!v.muted && v.volume > 0 && (!isFinite(d) || d > 90)) {
       // Every subtitle the page's player offers (it may not have downloaded them yet).
       var subs = subtitleList();
-      try { B.videoStarted(v.currentTime || 0, JSON.stringify(subs), v.currentSrc || '', location.origin); } catch (x) {}
+      if (pipePost) pipePost({ t: 'start', pos: v.currentTime || 0, subs: JSON.stringify(subs), src: v.currentSrc || '' });
     }
   }, true);
   document.addEventListener('timeupdate', function (e) {

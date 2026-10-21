@@ -8,13 +8,15 @@ final class Net {
 
     /**
      * True for the home network and the TV itself: loopback, private and link-local IP literals
-     * (v4 and v6), "localhost" and mDNS ".local" names. Host names aren't resolved.
+     * (v4 and v6), "localhost", single-label names and the home-network suffixes (.local, .lan,
+ * .home.arpa, .internal). Names aren't resolved here (SafeHttp checks real addresses).
      */
     static boolean isLocal(String host) {
         if (host == null || host.isEmpty()) return false;
         String h = host.toLowerCase(Locale.ROOT);
         if (h.startsWith("[") && h.endsWith("]")) h = h.substring(1, h.length() - 1);
-        if (h.equals("localhost") || h.endsWith(".localhost") || h.endsWith(".local")) return true;
+        if (h.equals("localhost") || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".lan")
+                || h.endsWith(".home.arpa") || h.endsWith(".internal") || !h.contains(".") && !h.contains(":")) return true;
         if (h.contains(":")) { // IPv6
             return h.equals("::1") || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80:")
                     || h.startsWith("::ffff:") && isLocal(h.substring(7));

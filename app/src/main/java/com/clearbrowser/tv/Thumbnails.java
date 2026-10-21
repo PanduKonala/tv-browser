@@ -10,10 +10,7 @@ import android.os.Looper;
 import android.util.Log;
 import android.util.LruCache;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -68,7 +65,11 @@ final class Thumbnails {
     private volatile long wanted = -1;
     private volatile boolean closed;
 
-    Thumbnails(String trackUrl, String videoUrl, Map<String, String> headers) {
+    /** False unless the page is on the local network: see SafeHttp. */
+    private final boolean allowLocal;
+
+    Thumbnails(String trackUrl, String videoUrl, Map<String, String> headers, boolean allowLocal) {
+        this.allowLocal = allowLocal;
         this.trackUrl = trackUrl;
         this.videoUrl = videoUrl;
         this.headers = headers;
@@ -212,6 +213,10 @@ final class Thumbnails {
         if (retrieverFailed || videoUrl == null) return null;
         try {
             if (retriever == null) {
+                // The retriever downloads natively, outside SafeHttp: never on a local address.
+                if (!allowLocal && SafeHttp.resolvesLocal(android.net.Uri.parse(videoUrl).getHost())) {
+                    throw new IOException("local network address");
+                }
                 retriever = new MediaMetadataRetriever();
                 retriever.setDataSource(videoUrl, new HashMap<>(headers));
             }
@@ -227,22 +232,11 @@ final class Thumbnails {
 
     /** Fetches with the headers a browser sends cross-site, which thumbnail servers check. */
     private byte[] fetch(String url) throws IOException {
-        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-        c.setConnectTimeout(10_000);
-        c.setReadTimeout(15_000);
-        for (Map.Entry<String, String> h : headers.entrySet()) c.setRequestProperty(h.getKey(), h.getValue());
-        c.setRequestProperty("Sec-Fetch-Mode", "cors");
-        c.setRequestProperty("Sec-Fetch-Site", "cross-site");
-        c.setRequestProperty("Sec-Fetch-Dest", "empty");
-        int code = c.getResponseCode();
-        if (code != 200) throw new IOException("HTTP " + code + " " + url);
-        try (InputStream in = c.getInputStream()) {
-            ByteArrayOutputStream out = new ByteArrayOutputStream(64 * 1024);
-            byte[] buf = new byte[16 * 1024];
-            int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-            return out.toByteArray();
-        }
+        Map<String, String> h = new HashMap<>(headers);
+        h.put("Sec-Fetch-Mode", "cors");
+        h.put("Sec-Fetch-Site", "cross-site");
+        h.put("Sec-Fetch-Dest", "empty");
+        return SafeHttp.get(allowLocal, url, h);
     }
 
     private static String resolve(String base, String rel) {

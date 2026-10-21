@@ -11,11 +11,7 @@ import androidx.media3.extractor.text.CuesWithTiming;
 import androidx.media3.extractor.text.DefaultSubtitleParserFactory;
 import androidx.media3.extractor.text.SubtitleParser;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -51,7 +47,10 @@ final class ExternalSubs {
     });
     private final Handler ui = new Handler(Looper.getMainLooper());
 
-    ExternalSubs(Map<String, String> headers) { this.headers = headers; }
+    /** False unless the page is on the local network: see SafeHttp. */
+    private final boolean allowLocal;
+
+    ExternalSubs(Map<String, String> headers, boolean allowLocal) { this.headers = headers; this.allowLocal = allowLocal; }
 
     void add(String url, String label, String lang, String type) {
         if (url == null || url.isEmpty() || "json".equals(type)) return;
@@ -113,18 +112,6 @@ final class ExternalSubs {
     }
 
     private byte[] fetch(String url) throws IOException {
-        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-        c.setConnectTimeout(10_000);
-        c.setReadTimeout(20_000);
-        for (Map.Entry<String, String> h : headers.entrySet()) c.setRequestProperty(h.getKey(), h.getValue());
-        int code = c.getResponseCode();
-        if (code != 200) throw new IOException("HTTP " + code);
-        try (InputStream in = c.getInputStream()) {
-            ByteArrayOutputStream out = new ByteArrayOutputStream(64 * 1024);
-            byte[] buf = new byte[16 * 1024];
-            int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-            return out.toByteArray();
-        }
+        return SafeHttp.get(allowLocal, url, headers);
     }
 }

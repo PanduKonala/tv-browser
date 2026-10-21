@@ -57,6 +57,14 @@ final class PagePipe {
     private static final AtomicInteger IDS = new AtomicInteger();
     private static final Handler UI = new Handler(Looper.getMainLooper());
 
+    /** What frames report about their video. The origin is WebView's, not the frame's own claim. */
+    interface Reports {
+        void playlist(String url, String finalUrl, String body, String origin);
+        void started(double position, String subtitlesJson, String src, String origin);
+    }
+
+    private static volatile Reports reports;
+
     private static final class Pending {
         final CompletableFuture<Answer> done = new CompletableFuture<>();
         /** The frame we asked: only it may answer (any frame can post to us, ads included). */
@@ -80,7 +88,8 @@ final class PagePipe {
     }
 
     /** Every frame of {@code web} gets window.ClearPipe. UI thread. */
-    static void install(WebView web) {
+    static void install(WebView web, Reports r) {
+        reports = r;
         if (!supported()) return;
         WebViewCompat.addWebMessageListener(web, NAME, Collections.singleton("*"),
                 (view, message, sourceOrigin, isMainFrame, reply) -> onMessage(message, sourceOrigin, reply));
@@ -120,6 +129,15 @@ final class PagePipe {
         }
         try {
             JSONObject o = new JSONObject(data);
+            String type = o.optString("t", "");
+            if (!type.isEmpty()) {
+                Reports r = reports;
+                String origin = norm(sourceOrigin.toString());
+                if (r == null || !origin.startsWith("http")) return;
+                if (type.equals("pl")) r.playlist(o.optString("url"), o.optString("fin", null), o.optString("body"), origin);
+                else if (type.equals("start")) r.started(o.optDouble("pos", 0), o.optString("subs", "[]"), o.optString("src", ""), origin);
+                return;
+            }
             Pending p = PENDING.get(o.getInt("id"));
             if (p == null || p.frame != reply) return; // not the frame we asked
             Answer a = new Answer();

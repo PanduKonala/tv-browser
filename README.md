@@ -134,18 +134,40 @@ the browser do:
   WebView remote debugging. Certificate errors cancel the load (there is no "proceed anyway").
 - **Other apps** can open http/https addresses in the browser and nothing else: a `javascript:`
   or `file:` address sent to it is ignored. The TV player isn't exported.
-- **Home network**: the TV player downloads natively, outside the browser's Private Network Access
-  guard, so it never takes a stream on a local address (router, NAS, the TV) unless the page itself
-  is on the local network.
+- **Home network**: the TV player, its subtitles and thumbnails download natively, outside the
+  browser's Private Network Access guard. They use one HTTP client (SafeHttp, OkHttp) that, unless
+  the page itself is on the local network, refuses names resolving to local addresses (router, NAS,
+  the TV) and checks the address every connection actually reached, redirects and numeric
+  addresses included, so DNS rebinding can't slip through.
 - **The JavaScript bridge** (every frame has it) only offers harmless calls: hiding rules for a
   host, link prefetch within the site being shown, video events. Home-page actions (remove
   bookmark, clear recents) work only while our home page is shown, and it renders site titles as
   text and makes only http/https links.
-- **Playlist copies** belong to the frame that received them, and the TV player reads only the
-  playing frame's copies, so an ad frame can't swap the stream; all copies stay under 8 MB.
+- **Frame reports** (a playlist arrived, a video started) come over the web-message channel, where
+  WebView names the sending frame; the JS bridge can't tell frames apart, so nothing frame-specific
+  goes through it. A frame can't take over another frame's stream entry, playlist copies belong to
+  the frame that received them, and the TV player reads only the playing frame's copies; all copies
+  stay under 8 MB. Known limit: any frame can claim "my video started", so an ad frame on the page
+  can race the real video into the TV player with its own stream (an annoyance, not a way in; the
+  home-network guard still applies).
 - **The page pipe** asks one frame to fetch and accepts the answer only from that frame.
 - **The debug test hook** (TEST_HOLD, only with test logging on) accepts broadcasts from adb only
   (it requires the DUMP permission, which apps can't hold).
+
+Tested on the Living Room TV (2026-10-21) with a hostile test site (a public-looking nip.io name
+pointing at a test server on the LAN):
+
+| Attack | Result |
+| --- | --- |
+| App sends `javascript:` / `file:` addresses | ignored |
+| Public page plays a stream at a LAN IP | TV player never fetched it |
+| Public page plays a stream at a name resolving to the LAN (rebinding) | refused at lookup, back to the page; 0 native requests |
+| Second frame spams fake pipe answers (200/s) and claims the player's playlist | 0 requests for its stream, 0 playback errors |
+| 40 × 2 MB fake playlists | Java heap +8.9 MB after GC (the 8 MB cap) |
+| Page opens `file:` home page (top and iframe), calls clear-recents / remove-bookmark | blocked; bookmarks and recents intact |
+| Location, `file:` fetch, APK download, `intent://`, `market://` | denied / blocked / nothing saved / no app opened |
+| Camera, microphone | the TV has none (NotFoundError); requests are denied in code |
+| Debug hook | Android reports requiredPermission=DUMP |
 
 ## Test logging
 
