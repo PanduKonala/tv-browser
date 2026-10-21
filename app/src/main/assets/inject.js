@@ -309,7 +309,46 @@
       if (byUser(v)) { v.__clearOk = true; return false; }
       return true;
     };
+    // Some players don't expect a refused play() and sit on their loading spinner with nothing to
+    // press. So a held video with sound that fills a good part of its frame (a real player, not a
+    // preview) gets our own Play button on top; pressing it plays the video, as its own button would.
+    var playButton = function (v) {
+      if (v.__clearBtn || v.muted || !document.documentElement) return;
+      var r = v.getBoundingClientRect();
+      if (r.width < 240 || r.height < 135 || r.width * r.height < innerWidth * innerHeight * 0.25) return;
+      var b = document.createElement('div');
+      b.setAttribute('role', 'button');
+      b.setAttribute('aria-label', 'Play');
+      var place = function () {
+        var q = v.getBoundingClientRect();
+        b.style.cssText = 'all:initial;position:fixed;z-index:2147483647;display:flex;align-items:center;justify-content:center;'
+            + 'left:' + q.left + 'px;top:' + q.top + 'px;width:' + q.width + 'px;height:' + q.height + 'px;'
+            + 'background:rgba(0,0,0,.35);cursor:pointer';
+      };
+      place();
+      b.innerHTML = '<div style="all:initial;display:flex;align-items:center;gap:14px;padding:18px 34px 18px 28px;border-radius:999px;'
+          + 'background:#e50914;color:#fff;font:600 26px/1 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.5)">'
+          + '<svg width="30" height="30" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"/></svg>Play</div>';
+      var done = function () {
+        if (!v.__clearBtn) return;
+        v.__clearBtn = null;
+        b.remove();
+        removeEventListener('resize', place);
+      };
+      b.addEventListener('click', function (e) {
+        e.preventDefault(); e.stopPropagation();
+        done();
+        v.__clearOk = true;
+        realPlay.call(v).catch(function () {});
+      }, true);
+      v.addEventListener('playing', done);
+      v.addEventListener('emptied', done);
+      addEventListener('resize', place);
+      v.__clearBtn = b;
+      document.documentElement.appendChild(b);
+    };
     var heldOne = function (v) {
+      try { playButton(v); } catch (e) {}
       S0.previewsHeld++;
       if (DEBUG) try { B.videoStats(JSON.stringify({ autoplayHeld: String(v.currentSrc || v.src).slice(0, 120) })); } catch (e) {}
     };

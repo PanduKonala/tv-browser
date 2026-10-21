@@ -84,7 +84,9 @@ Bookmarks button in the toolbar jumps to the bookmarks.
 - **No autoplay** (toggle in ⋮): a video loads but plays only when you press play. Hover previews,
   hero trailers and the next episode wait; with sound or muted. A video may start within a second of
   a press in its frame, or up to 5 s after a press on the video itself or inside an embedded player
-  (players often load the stream first); the remote's play key counts as a press. Each preview would
+  (players often load the stream first); the remote's play key counts as a press. A held video with
+  sound that fills its player gets a red **▶ Play** button on top, since some players don't expect
+  to be held and would sit on their loading spinner. Each preview would
   also decode video and hold GPU memory on a TV that has little.
 - Blocker cost per page is kept off the page's main thread: hiding rules indexed in the heap,
   list answers cached per host, list files pre-warmed at start.
