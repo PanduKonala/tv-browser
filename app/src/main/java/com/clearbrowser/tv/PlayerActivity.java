@@ -100,6 +100,9 @@ public class PlayerActivity extends Activity {
         // Controls only when asked for (Up/Down, or OK to pause): auto-showing them on pause would
         // grab Left/Right away from scrubbing.
         view.setControllerAutoShow(false);
+        // The bar and its timeline appear and go together, at once: no slide, no timeline sweeping
+        // across the buttons as it hides.
+        view.setControllerAnimationEnabled(false);
         styleControls();
         FrameLayout root = new FrameLayout(this);
         root.addView(view);
@@ -642,7 +645,6 @@ public class PlayerActivity extends Activity {
 
     // ---------------------------------------------------------------- the control bar
 
-    private boolean muted;
     /** The big play/pause sign in the middle of the picture (OK with the bar hidden). */
     private android.widget.ImageView centerSign;
     private boolean pauseSignShown;
@@ -653,13 +655,6 @@ public class PlayerActivity extends Activity {
         click(R.id.clear_play, this::togglePlayCentered);
         click(R.id.clear_back10, () -> seekBy(-10_000));
         click(R.id.clear_fwd10, () -> seekBy(10_000));
-        click(R.id.clear_volume, () -> {
-            muted = !muted;
-            if (player != null) player.setVolume(muted ? 0f : 1f);
-            ((android.widget.ImageButton) view.findViewById(R.id.clear_volume))
-                    .setImageResource(muted ? R.drawable.ic_p_mute : R.drawable.ic_p_volume);
-            ((android.widget.ProgressBar) view.findViewById(R.id.clear_volume_bar)).setProgress(muted ? 0 : 100);
-        });
         click(R.id.clear_subs, () -> openPanel(PlayerPanel.SUBS));
         click(R.id.clear_servers, () -> openPanel(PlayerPanel.PLAYBACK)); // "Change server" lives there
         click(R.id.clear_settings, () -> openPanel(PlayerPanel.QUALITY));
@@ -675,6 +670,7 @@ public class PlayerActivity extends Activity {
             if (tbar instanceof androidx.media3.ui.DefaultTimeBar && !tbar.hasFocus()) {
                 ((androidx.media3.ui.DefaultTimeBar) tbar).hideScrubber(false); // knob only when the timeline is selected
             }
+            if (shown && panel.isOpen()) { view.hideController(); return; } // the settings panel keeps the focus
             if (shown) {
                 if (android.os.SystemClock.uptimeMillis() - toggledAt > 1500) hideCenterSign();
                 View b = view.findViewById(R.id.clear_play);
@@ -875,8 +871,12 @@ public class PlayerActivity extends Activity {
         // Left/Right with the controls hidden (and FF/Rewind any time): scrub with previews.
         boolean panelOpen = panel.isOpen();
         if (panelOpen) {
-            if (k == KeyEvent.KEYCODE_BACK || k == KeyEvent.KEYCODE_MENU || k == KeyEvent.KEYCODE_CAPTIONS) {
+            if (k == KeyEvent.KEYCODE_MENU || k == KeyEvent.KEYCODE_CAPTIONS) {
                 if (!down) panel.close();
+                return true;
+            }
+            if (k == KeyEvent.KEYCODE_BACK) {
+                if (!down && !panel.back()) panel.close(); // options -> categories -> closed
                 return true;
             }
             return super.dispatchKeyEvent(e); // D-pad moves through the panel

@@ -124,6 +124,45 @@ final class PlayerPanel extends FrameLayout {
 
     boolean isOpen() { return getVisibility() == VISIBLE; }
 
+    /**
+     * While open, the D-pad stays inside the panel (never down into the control bar behind it), and
+     * Up/Down stay in their column: past the last option nothing happens, rather than the focus
+     * landing on some category and switching to it. Right from a category goes to its current
+     * choice; Left from an option goes back to its own category (not whichever one is level with it).
+     */
+    @Override
+    public View focusSearch(View focused, int direction) {
+        View next = super.focusSearch(focused, direction);
+        if (!isOpen()) return next;
+        boolean fromList = within(focused, list), fromCats = within(focused, categories);
+        if (direction == FOCUS_RIGHT && fromCats) {
+            View pick = firstRow();
+            return pick != null ? pick : focused;
+        }
+        if (direction == FOCUS_LEFT && fromList) {
+            View cat = categories.findViewWithTag(current);
+            return cat != null ? cat : focused;
+        }
+        if ((direction == FOCUS_UP || direction == FOCUS_DOWN) && (fromList && !within(next, list) || fromCats && !within(next, categories))) {
+            return focused;
+        }
+        return within(next, this) ? next : focused;
+    }
+
+    private static boolean within(View v, View group) {
+        for (; v != null; v = v.getParent() instanceof View ? (View) v.getParent() : null) if (v == group) return true;
+        return false;
+    }
+
+    /** Back: from the options to the categories; returns false when already there (then the panel closes). */
+    boolean back() {
+        if (!within(findFocus(), list)) return false;
+        View cat = categories.findViewWithTag(current);
+        if (cat == null) return false;
+        cat.requestFocus();
+        return true;
+    }
+
     /** Opens on {@code category} with the focus on its first option. */
     void open(String category) {
         setVisibility(VISIBLE);
@@ -165,17 +204,26 @@ final class PlayerPanel extends FrameLayout {
      * on a ◀ ▶ row, Left would change the value instead of reaching the categories.
      */
     private void focusFirstRow() {
-        View fallback = null;
+        View pick = firstRow();
+        if (pick != null) { pick.requestFocus(); return; }
+        // Nothing to pick here (one quality, say): the focus goes to the category itself, so it's
+        // never lost (the button that opened the panel has just been hidden with the bar).
+        View cat = categories.findViewWithTag(current);
+        if (cat != null) cat.requestFocus();
+    }
+
+    /** The option to start on: the current choice (✓), else the first without ◀ ▶, else the first; null if none. */
+    @androidx.annotation.Nullable
+    private View firstRow() {
+        View fallback = null, any = null;
         for (int i = 0; i < list.getChildCount(); i++) {
             View v = list.getChildAt(i);
             if (!v.isFocusable()) continue;
-            if (Boolean.TRUE.equals(v.getTag(R.id.panel_checked))) { v.requestFocus(); return; }
+            if (Boolean.TRUE.equals(v.getTag(R.id.panel_checked))) return v;
             if (fallback == null && !Boolean.TRUE.equals(v.getTag(R.id.panel_adjust))) fallback = v;
+            if (any == null) any = v;
         }
-        if (fallback == null) for (int i = 0; i < list.getChildCount(); i++) {
-            if (list.getChildAt(i).isFocusable()) { fallback = list.getChildAt(i); break; }
-        }
-        if (fallback != null) fallback.requestFocus();
+        return fallback != null ? fallback : any;
     }
 
     private View rowView(Row r) {

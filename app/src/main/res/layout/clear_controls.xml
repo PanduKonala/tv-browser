@@ -25,6 +25,7 @@
 
         <androidx.media3.ui.DefaultTimeBar
             android:id="@id/exo_progress"
+            android:nextFocusDown="@+id/clear_play"
             android:layout_width="match_parent"
             android:layout_height="22dp"
             android:layout_marginStart="10dp"
@@ -82,28 +83,6 @@
                     style="@style/PlayerBarAmount"
                     android:text="10" />
             </FrameLayout>
-
-            <ImageButton
-                android:id="@+id/clear_volume"
-                style="@style/PlayerBarButton"
-                android:contentDescription="Mute"
-                android:src="@drawable/ic_p_volume" />
-
-            <SeekBar
-                android:id="@+id/clear_volume_bar"
-                android:layout_width="96dp"
-                android:layout_height="20dp"
-                android:layout_marginEnd="14dp"
-                android:clickable="false"
-                android:focusable="false"
-                android:max="100"
-                android:paddingStart="7dp"
-                android:paddingEnd="7dp"
-                android:progress="100"
-                android:progressBackgroundTint="#55FFFFFF"
-                android:progressTint="#E50914"
-                android:splitTrack="false"
-                android:thumb="@drawable/volume_knob" />
 
             <TextView
                 android:id="@id/exo_position"
