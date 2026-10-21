@@ -16,6 +16,10 @@ Bookmarks button in the toolbar jumps to the bookmarks.
   ad domains → dropped; same site → open in place; other sites → asks (Open / Always / Block / Always block).
 - **Redirects**: a page that sends you to another site without a click is stopped; so are
   `intent://` / `market://` app-store hijacks and downloads.
+- **Site notices**: the app's own list (`assets/site_fixes.txt`, uBlock Origin's
+  `set-local-storage-item` syntax) stores a site's "dismissed" flag before the page loads, so a
+  nag the site shows until you close it never appears (for example tbcpl.lol's "use Brave or
+  uBlock Origin" notice). Block-list updates don't touch it.
 - The shield in the toolbar shows the count for the page and turns blocking off for a site that breaks.
 
 ## Streaming

@@ -1,0 +1,7 @@
+! Clear Browser's own annoyance fixes, applied with the shields on.
+! uBlock Origin syntax, one scriptlet: domain##+js(set-local-storage-item, key, value)
+! The key is stored before the page's scripts run, and only if the page hasn't stored it already,
+! so a notice the site shows "until dismissed" never appears.
+
+! "Before clicking any link!!! Use Brave or uBlock Origin" notice (this browser blocks those ads already)
+tbcpl.lol##+js(set-local-storage-item, tbcpl-safety-dismissed-v1, 1)

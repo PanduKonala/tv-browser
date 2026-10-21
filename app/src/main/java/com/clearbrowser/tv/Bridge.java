@@ -34,6 +34,12 @@ final class Bridge {
         return host.shieldsOn() ? Blocker.get().cssForHost(hostname) : "";
     }
 
+    /** The app's own fixes for this host: [[key, value], ...] to put in localStorage, or "". */
+    @JavascriptInterface
+    public String storage(String hostname) {
+        return host.shieldsOn() ? SiteFixes.storageFor(hostname) : "";
+    }
+
     @JavascriptInterface
     public String generic(String tokens) {
         return host.shieldsOn() ? Blocker.get().cssForTokens(tokens) : "";

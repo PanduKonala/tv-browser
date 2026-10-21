@@ -149,6 +149,15 @@
   var B = window.ClearBridge;
   if (!B) return;
 
+  // The app's own annoyance fixes: store a site's "notice dismissed" flag before its scripts look
+  // for it, as its close button would (never over a value the site stored itself).
+  try {
+    var fixes = B.storage(location.hostname);
+    if (fixes) JSON.parse(fixes).forEach(function (kv) {
+      if (localStorage.getItem(kv[0]) === null) localStorage.setItem(kv[0], kv[1]);
+    });
+  } catch (e) {}
+
   // Lighter rendering for TV GPUs: frosted-glass blur (backdrop-filter) is recomputed for every
   // scroll frame and is the biggest single cost on these chips. Without it, translucent bars stay
   // translucent, just not blurred.

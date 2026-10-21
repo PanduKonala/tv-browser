@@ -7,6 +7,7 @@ public class App extends Application {
     public void onCreate() {
         super.onCreate();
         Blocker.get().init(this);
+        SiteFixes.init(this);
     }
 
     @Override
