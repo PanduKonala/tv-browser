@@ -66,6 +66,8 @@
             android:textColorHint="#6F7A96"
             android:textSize="16sp" />
 
+        <ImageButton android:id="@+id/translate" style="@style/BarButton" android:src="@drawable/ic_translate"
+            android:contentDescription="Translate this page to English" android:visibility="gone" />
         <ImageButton android:id="@+id/star" style="@style/BarButton" android:src="@drawable/ic_star_border" android:contentDescription="Bookmark this page" />
         <ImageButton android:id="@+id/bookmarks" style="@style/BarButton" android:src="@drawable/ic_bookmarks" android:contentDescription="Bookmarks" />
 

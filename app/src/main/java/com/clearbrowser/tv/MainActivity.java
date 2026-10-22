@@ -388,6 +388,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
             if (!req.isForMainFrame()) return false;
+            if (keepTranslating(req.getUrl().toString())) return true;
             Uri u = req.getUrl();
             String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase(Locale.US);
             if (!scheme.equals("http") && !scheme.equals("https")) {
@@ -438,7 +439,11 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
 
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
+            // Navigations shouldOverrideUrlLoading doesn't see (redirects, script-driven): same rule.
+            if (keepTranslating(url)) { view.stopLoading(); return; }
             setTop(url);
+            pageLanguage = null;
+            showTranslate(url);
             speed.pageStarted(hostOf(url));
             pageBlocked.set(0);
             streams.clear();
@@ -471,6 +476,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             if (Prefs.isHome(url)) renderHome();
             else if (url != null && url.startsWith("http") && view.getTitle() != null) prefs.addRecent(url, view.getTitle());
             logPerf(url);
+            offerTranslation(url);
             // WebView too old for document-start scripts: inject after load instead (weaker, but works).
             if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 web.evaluateJavascript(injectJs, null);
@@ -953,6 +959,16 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                 if (!down) hideToolbar();
                 return true;
             }
+            // Left/Right on the address while it's still all selected (not being edited) move to the
+            // buttons beside it, rather than just moving the text cursor first.
+            if ((k == KeyEvent.KEYCODE_DPAD_RIGHT || k == KeyEvent.KEYCODE_DPAD_LEFT) && urlField.hasFocus()
+                    && urlField.getSelectionStart() == 0 && urlField.getSelectionEnd() == urlField.length() && urlField.length() > 0) {
+                if (down) {
+                    View next = urlField.focusSearch(k == KeyEvent.KEYCODE_DPAD_RIGHT ? View.FOCUS_RIGHT : View.FOCUS_LEFT);
+                    if (next != null) next.requestFocus();
+                }
+                return true;
+            }
             return super.dispatchKeyEvent(e);
         }
 
@@ -1059,6 +1075,7 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             web.reload();
         });
         findViewById(R.id.menu).setOnClickListener(v -> showMenu());
+        findViewById(R.id.translate).setOnClickListener(v -> { hideToolbar(); toggleTranslation(); });
         urlField.setOnEditorActionListener((v, actionId, ev) -> {
             if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_DONE
                     || (ev != null && ev.getKeyCode() == KeyEvent.KEYCODE_ENTER && ev.getAction() == KeyEvent.ACTION_DOWN)) {
@@ -1099,6 +1116,64 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         web.requestFocus();
     }
 
+    /** The language of the page shown, when it isn't English (set once the page has loaded). */
+    private String pageLanguage;
+    /**
+     * The site being read in English: its other pages open translated too (Google's proxy misses
+     * links that sites' own scripts navigate to). Cleared by "Show the original page".
+     */
+    private String translateSite;
+    private String lastRerouted;
+
+    /** If {@code url} is another page of the site being read in English, open it translated. */
+    private boolean keepTranslating(String url) {
+        if (translateSite == null || url == null || !(url.startsWith("http://") || url.startsWith("https://"))) return false;
+        if (Translate.isTranslated(url) || url.equals(lastRerouted)) return false;
+        if (!translateSite.equals(Blocker.siteOf(hostOf(url)))) return false;
+        lastRerouted = url;
+        load(Translate.toEnglish(url));
+        return true;
+    }
+
+    /** English page through Google Translate, or back to the original. */
+    private void toggleTranslation() {
+        String url = web.getUrl();
+        if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) {
+            notice("Only web pages can be translated");
+            return;
+        }
+        if (Translate.isTranslated(url)) {
+            translateSite = null;
+            load(Translate.original(url));
+        } else {
+            translateSite = Blocker.siteOf(hostOf(url));
+            notice("Translating to English…");
+            load(Translate.toEnglish(url));
+        }
+    }
+
+    /** The toolbar's translate button: shown on translated pages and on pages not in English. */
+    private void showTranslate(String url) {
+        boolean translated = url != null && Translate.isTranslated(url);
+        View b = findViewById(R.id.translate);
+        b.setVisibility(translated || pageLanguage != null ? View.VISIBLE : View.GONE);
+        b.setContentDescription(translated ? "Show the original page" : "Translate this page to English");
+        b.setAlpha(translated ? 0.6f : 1f);
+    }
+
+    /** After a page loads: if it isn't in English, show the translate button and say so once. */
+    private void offerTranslation(String url) {
+        if (url == null || !url.startsWith("http") || Translate.isTranslated(url)) return;
+        web.evaluateJavascript(Translate.DETECT_JS, r -> {
+            if (r == null || !url.equals(web.getUrl())) return;
+            String lang = Translate.foreignLanguage(r);
+            if (lang == null) return;
+            pageLanguage = lang;
+            showTranslate(url);
+            notice("This page is in " + lang + " · Menu, then → to translate it to English", 6000);
+        });
+    }
+
     private void updateToolbarState() {
         String url = web.getUrl();
         star.setImageResource(url != null && prefs.isBookmarked(url) ? R.drawable.ic_star : R.drawable.ic_star_border);
@@ -1116,7 +1191,10 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     private void showMenu() {
         String site = Blocker.siteOf(topHost);
         boolean desktop = prefs.desktop();
+        String current = web.getUrl();
+        boolean translated = current != null && Translate.isTranslated(current);
         String[] items = {
+                translated ? "Show the original page (not translated)" : "Translate this page to English",
                 "Set this page as home",
                 "Use the Clear home page as home",
                 desktop ? "Desktop site: on  (switch to mobile)" : "Desktop site: off  (switch to desktop)",
@@ -1133,7 +1211,9 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         };
         dialog = new AlertDialog.Builder(this)
                 .setTitle("Clear Browser · " + String.format(Locale.US, "%,d", totalBlocked()) + " blocked")
-                .setItems(items, (d, which) -> {
+                .setItems(items, (d, item) -> {
+                    if (item == 0) { hideToolbar(); toggleTranslation(); return; }
+                    int which = item - 1; // the rest of the list, as before the translate item
                     switch (which) {
                         case 0: {
                             String url = web.getUrl();
@@ -1187,14 +1267,16 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     private final Runnable hideNotice = () -> notice.animate().alpha(0f).setDuration(250)
             .withEndAction(() -> notice.setVisibility(View.GONE));
 
-    private void notice(String text) {
+    private void notice(String text) { notice(text, 2600); }
+
+    private void notice(String text, long ms) {
         ui.post(() -> {
             notice.setText(text);
             notice.animate().cancel();
             notice.setAlpha(1f);
             notice.setVisibility(View.VISIBLE);
             ui.removeCallbacks(hideNotice);
-            ui.postDelayed(hideNotice, 2600);
+            ui.postDelayed(hideNotice, ms);
         });
     }
 

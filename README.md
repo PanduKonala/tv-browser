@@ -22,6 +22,18 @@ Bookmarks button in the toolbar jumps to the bookmarks.
   uBlock Origin" notice). Block-list updates don't touch it.
 - The shield in the toolbar shows the count for the page and turns blocking off for a site that breaks.
 
+## Translation
+
+- A page that isn't in English (by its declared language, or mostly non-Latin text when it doesn't
+  declare one) shows a note and a translate button in the toolbar, right after the address
+  (Menu, then →). ⋮ → "Translate this page to English" does the same.
+- Pages open through Google Translate's page proxy (`site-com.translate.goog/...`). Once a site is
+  translated, its other pages open translated too, including links its own scripts navigate to,
+  until "Show the original page" (the same button, or ⋮).
+- The proxied page runs on Google's address: logins and some video players don't carry over, so
+  switch back to the original for those. Google's embeddable translate widget was retired on
+  2026-10-01, so it isn't used.
+
 ## Streaming
 
 - **TV player, automatic**: when a page starts a real video (sound on, longer than 90 s or
