@@ -50,7 +50,7 @@ import java.util.Map;
 public class PlayerActivity extends Activity {
     static final String EXTRA_URL = "url", EXTRA_HEADERS = "headers", EXTRA_POS = "pos", EXTRA_UA = "ua",
             EXTRA_SUBS = "subs", EXTRA_ORIGIN = "origin", EXTRA_THUMBS = "thumbs",
-            EXTRA_PIPE = "pipe", EXTRA_LOCAL_OK = "localOk";
+            EXTRA_PIPE = "pipe", EXTRA_LOCAL_OK = "localOk", EXTRA_ALTS = "alts";
     private static final String[] SIZES = {"Small", "Medium", "Large", "Extra large"};
     private static final float[] SIZE_SCALE = {0.8f, 1.0f, 1.3f, 1.65f};
     private static final String[] STYLES = {"White, outlined", "Yellow, outlined", "White on dark box", "Yellow on dark box"};
@@ -240,6 +240,28 @@ public class PlayerActivity extends Activity {
         });
         view.setPlayer(player);
 
+        // A better quality list than the one the page's player loaded? (QualityProbe; a few small
+        // fetches off the main thread, at most a few seconds, then playback starts either way.)
+        ArrayList<String> alts = in.getStringArrayListExtra(EXTRA_ALTS);
+        if (alts != null || QualityProbe.withoutLow(url) != null) {
+            Map<String, String> probeHeaders = new HashMap<>(headers);
+            probeHeaders.put("User-Agent", in.getStringExtra(EXTRA_UA));
+            String copy = PageCopies.text(Uri.parse(url), in.getStringExtra(EXTRA_PIPE));
+            new Thread(() -> {
+                String best = QualityProbe.best(url, copy, alts, probeHeaders, localOk);
+                runOnUiThread(() -> {
+                    if (player == null || isFinishing()) return;
+                    url = best;
+                    startPlayback(in);
+                });
+            }, "quality-probe").start();
+        } else {
+            startPlayback(in);
+        }
+    }
+
+    /** Builds the media item for {@code url} and starts it. */
+    private void startPlayback(Intent in) {
         MediaItem.Builder item = new MediaItem.Builder().setUri(Uri.parse(url));
         String path = Uri.parse(url).getPath();
         path = path == null ? "" : path.toLowerCase();

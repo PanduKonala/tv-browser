@@ -74,6 +74,19 @@ final class SafeHttp {
         }
     }
 
+    /** Like {@link #get}, but gives up after 3 s: for optional lookups that mustn't delay playback. */
+    static byte[] getQuick(boolean allowLocal, String url, Map<String, String> headers) throws IOException {
+        Request.Builder r = new Request.Builder().url(url);
+        for (Map.Entry<String, String> h : headers.entrySet()) r.header(h.getKey(), h.getValue());
+        OkHttpClient quick = client(allowLocal).newBuilder().callTimeout(3, TimeUnit.SECONDS).build();
+        try (Response res = quick.newCall(r.build()).execute()) {
+            ResponseBody body = res.body();
+            if (res.code() != 200 || body == null) throw new IOException("HTTP " + res.code());
+            if (body.contentLength() > 2_000_000) throw new IOException("too big for a playlist");
+            return body.bytes();
+        }
+    }
+
     /** GET {@code url} with {@code headers}; the body, or an IOException for anything but 200. */
     static byte[] get(boolean allowLocal, String url, Map<String, String> headers) throws IOException {
         Request.Builder r = new Request.Builder().url(url);

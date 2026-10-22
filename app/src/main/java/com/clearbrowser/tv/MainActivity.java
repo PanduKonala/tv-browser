@@ -105,6 +105,8 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     /** Subtitle files the page fetched or declared (url -> label/language), handed to the TV player. */
     private final java.util.LinkedHashMap<String, Bundle> subtitles = new java.util.LinkedHashMap<>();
     private final Set<String> nativeFailed = Collections.synchronizedSet(new HashSet<>());
+    /** Playlist addresses each frame's page mentions (other qualities of its video), by frame origin. */
+    private final Map<String, List<String>> pageCandidates = new java.util.HashMap<>();
     private volatile long playingAt;
     private volatile double videoPos;
     /** What the page's video element reports it is playing (exact for file players, blob: for MSE). */
@@ -287,7 +289,8 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
             @Override public void playlist(String url, String finalUrl, String body, String origin) {
                 onPagePlaylist(url, finalUrl, body, origin);
             }
-            @Override public void started(double position, String subtitlesJson, String src, String origin) {
+            @Override public void started(double position, String subtitlesJson, String src, String cands, String origin) {
+                synchronized (pageCandidates) { pageCandidates.put(origin, QualityProbe.list(cands)); }
                 onVideoStarted(position, subtitlesJson, src, origin);
             }
         });
@@ -845,6 +848,11 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
         // The frame that can fetch for the TV player: where the stream was seen, else the playing frame.
         String pipe = s.origin != null ? s.origin : playerOrigin;
         if (pipe != null) i.putExtra(PlayerActivity.EXTRA_PIPE, pipe);
+        // Other playlists that frame's page mentions: the TV player picks the best quality among them.
+        synchronized (pageCandidates) {
+            List<String> c = pipe == null ? null : pageCandidates.get(pipe);
+            if (c != null && !c.isEmpty()) i.putStringArrayListExtra(PlayerActivity.EXTRA_ALTS, new ArrayList<>(c));
+        }
         // Local-network addresses only for a page that is itself on the local network (SafeHttp).
         i.putExtra(PlayerActivity.EXTRA_LOCAL_OK, Net.isLocal(topHost));
         startActivityForResult(i, REQ_PLAYER);

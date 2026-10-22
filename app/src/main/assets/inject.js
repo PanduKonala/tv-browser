@@ -578,6 +578,22 @@
     return out;
   }
 
+  // Playlist addresses the page mentions in its markup and inline scripts (player configs often list
+  // every quality, while the player loads just one): the TV player picks the best of them.
+  function playlistMentions() {
+    var out = [], seen = Object.create(null);
+    try {
+      var text = document.documentElement.innerHTML;
+      if (text.length > 3000000) text = text.slice(0, 3000000);
+      var re = /https?:(?:\\?\/){2}[^"'\s<>()]+?\.(?:m3u8|mpd)(?:\?[^"'\s<>()]*)?/gi, m;
+      while ((m = re.exec(text)) && out.length < 30) {
+        var u = m[0].replace(/\\\//g, '/').replace(/&amp;/g, '&');
+        if (!seen[u]) { seen[u] = 1; out.push(u); }
+      }
+    } catch (e) {}
+    return out;
+  }
+
   // Tell the app where the page's video is, so the TV player can pick up at the same spot.
   var lastTime = 0;
   document.addEventListener('playing', function (e) {
@@ -589,7 +605,8 @@
     if (!v.muted && v.volume > 0 && (!isFinite(d) || d > 90)) {
       // Every subtitle the page's player offers (it may not have downloaded them yet).
       var subs = subtitleList();
-      if (pipePost) pipePost({ t: 'start', pos: v.currentTime || 0, subs: JSON.stringify(subs), src: v.currentSrc || '' });
+      if (pipePost) pipePost({ t: 'start', pos: v.currentTime || 0, subs: JSON.stringify(subs), src: v.currentSrc || '',
+                               cands: JSON.stringify(playlistMentions()) });
     }
   }, true);
   document.addEventListener('timeupdate', function (e) {

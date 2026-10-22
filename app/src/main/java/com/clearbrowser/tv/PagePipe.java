@@ -60,7 +60,8 @@ final class PagePipe {
     /** What frames report about their video. The origin is WebView's, not the frame's own claim. */
     interface Reports {
         void playlist(String url, String finalUrl, String body, String origin);
-        void started(double position, String subtitlesJson, String src, String origin);
+        /** {@code candidatesJson}: playlist addresses the frame's page mentions (other qualities). */
+        void started(double position, String subtitlesJson, String src, String candidatesJson, String origin);
     }
 
     private static volatile Reports reports;
@@ -135,7 +136,8 @@ final class PagePipe {
                 String origin = norm(sourceOrigin.toString());
                 if (r == null || !origin.startsWith("http")) return;
                 if (type.equals("pl")) r.playlist(o.optString("url"), o.optString("fin", null), o.optString("body"), origin);
-                else if (type.equals("start")) r.started(o.optDouble("pos", 0), o.optString("subs", "[]"), o.optString("src", ""), origin);
+                else if (type.equals("start")) r.started(o.optDouble("pos", 0), o.optString("subs", "[]"), o.optString("src", ""),
+                        o.optString("cands", "[]"), origin);
                 return;
             }
             Pending p = PENDING.get(o.getInt("id"));

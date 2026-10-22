@@ -87,6 +87,12 @@ final class PageCopies {
         return frame == null ? null : COPIES.get(key(frame, uri.toString()));
     }
 
+    /** The playing frame's copy of {@code uri} as text; null if there's none. */
+    @Nullable static String text(Uri uri, @Nullable String frame) {
+        Copy c = get(uri, frame);
+        return c == null ? null : new String(c.body, StandardCharsets.UTF_8);
+    }
+
     /** HLS or DASH, from the playing frame's copy of {@code uri}; null if there's no copy. */
     @Nullable static String mimeOf(Uri uri, @Nullable String frame) {
         Copy c = get(uri, frame);

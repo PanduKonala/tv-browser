@@ -44,6 +44,13 @@ Bookmarks button in the toolbar jumps to the bookmarks.
   (no paused timers) and its renderer keeps an important priority, so the TV's Memory Shrinker
   doesn't kill it. Tested against a server that refuses anything without the page's session header:
   60 s at 720p, 0 stalls.
+- **Best quality the page offers**: tube sites' players often start on a reduced list (xvideos
+  loads `hls_low.m3u8`, 480p and 360p, while `hls.m3u8` beside it has 1080p). Before playing, the
+  TV player also looks at the playlists the page mentions (on the stream's server) and the same
+  name without a "low" marker, fetches them (small, at most 3 s each) and starts on the one with the
+  highest quality; the 1080p/60 cap still applies. Anything slow or refused just doesn't count.
+- **Remote play key**: with nothing playing, it starts the page's main video (the largest on
+  screen), never a small muted hover preview.
 - **Session-bound playlists**: the TV player starts from the page's copy of the playlist, and learns
   its type (HLS/DASH) from the content when the address doesn't say. Some embeds (enma.lol's tryembed server) keep the stream
   session in partitioned cookies, which Android's CookieManager doesn't hand out, so asking the
