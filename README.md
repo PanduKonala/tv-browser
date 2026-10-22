@@ -217,6 +217,10 @@ held scrolling: before ~4 fps (47 frames, all late); after ~60 fps (773 frames, 
 ⋮ has: set this page as home / Google as home, desktop/mobile site, ad blocking per site, TV
 player on/off, play this page's video in the TV player, forget site choices, clear cookies.
 
+- **Scrolling panels**: pushing into the top or bottom edge drags with a virtual finger that
+  starts near the middle of the scrollable box under the pointer's column (an episode list, a
+  side panel), or of the screen, never at the edge: the top of a box or of the screen is usually
+  a header, and a finger put down there dragged the header, so lists scrolled down but not up.
 ## Build & install
 
     python3 tools/build_filters.py           # refresh filter lists (optional)

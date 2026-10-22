@@ -163,6 +163,45 @@
   var B = window.ClearBridge;
   if (!B) return;
 
+  // Edge scrolling with the D-pad pointer drags with a virtual finger; tell the app where the
+  // scrollable box under the pointer is (an episode list, a side panel), so the finger goes inside
+  // it, in either direction. The last such box is kept while the pointer moves on (towards the
+  // screen edge, over a header); the app only uses it while the pointer stays in its column.
+  if (window.top === window && B.scroller) {
+    var scrollBox = null, scrollSent = '', scrollAt = 0;
+    var boxFor = function (el) {
+      for (; el && el.nodeType === 1 && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+        var st = getComputedStyle(el);
+        if (/auto|scroll|overlay/.test(st.overflowY) && el.scrollHeight > el.clientHeight + 1) return el;
+      }
+      return null;
+    };
+    var reportBox = function () {
+      var msg = '';
+      if (scrollBox && scrollBox.isConnected) {
+        var r = scrollBox.getBoundingClientRect(), W = innerWidth, Hh = innerHeight;
+        msg = JSON.stringify({ l: Math.max(0, r.left) / W, t: Math.max(0, r.top) / Hh,
+          r: Math.min(W, r.right) / W, b: Math.min(Hh, r.bottom) / Hh,
+          up: scrollBox.scrollTop > 0, down: scrollBox.scrollTop + scrollBox.clientHeight < scrollBox.scrollHeight - 1 });
+      }
+      if (msg !== scrollSent) { scrollSent = msg; try { B.scroller(msg); } catch (e) {} }
+    };
+    document.addEventListener('pointermove', function (e) {
+      var now = Date.now();
+      if (now - scrollAt < 150) return;
+      scrollAt = now;
+      var b = boxFor(e.target);
+      if (b) scrollBox = b;
+      else if (scrollBox) {
+        // Left the box sideways: back to scrolling the page.
+        var r = scrollBox.getBoundingClientRect();
+        if (e.clientX < r.left || e.clientX > r.right) scrollBox = null;
+      }
+      reportBox();
+    }, { capture: true, passive: true });
+    document.addEventListener('scroll', function () { if (scrollBox) reportBox(); }, { capture: true, passive: true });
+  }
+
   // The app's own annoyance fixes: store a site's "notice dismissed" flag before its scripts look
   // for it, as its close button would (never over a value the site stored itself).
   try {

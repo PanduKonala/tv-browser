@@ -27,6 +27,8 @@ final class Bridge {
         void removeRecent(String url);
         /** The pointer rests on a link in the top page. */
         void prefetch(String url);
+        /** The scrollable box last under the pointer in the top page (JSON rect + directions), or "". */
+        void scroller(String json);
     }
 
     private final Host host;
@@ -77,6 +79,11 @@ final class Bridge {
     @JavascriptInterface
     public void clearRecent() {
         host.clearRecent();
+    }
+
+    @JavascriptInterface
+    public void scroller(String json) {
+        host.scroller(json);
     }
 
     @JavascriptInterface

@@ -19,6 +19,12 @@ public class CursorLayout extends FrameLayout {
     interface Listener {
         /** Whether pushing into an edge may scroll what's under the pointer (not in fullscreen video). */
         boolean canScroll();
+        /**
+         * The scrollable box (an episode list, a side panel) in the pointer's column at {@code x}
+         * that can still scroll that way ({@code dirY} 1 down, -1 up), in this view's pixels; null
+         * for the page itself.
+         */
+        android.graphics.RectF scrollArea(float x, int dirY);
     }
 
     private static final float BASE_SPEED = 6f;   // px per frame when a key is first pressed
@@ -43,6 +49,10 @@ public class CursorLayout extends FrameLayout {
     private boolean dragging;
     private long dragDownTime;
     private float fingerX, fingerY;
+    /** Where the virtual finger may move: the scrollable box being dragged, or the whole screen. */
+    private float dragL, dragT, dragR, dragB;
+    /** Where each vertical stroke starts (the finger is put back here when it runs out of room). */
+    private float strokeStartY;
     private int scrollFrames;
     private Listener listener;
 
@@ -154,22 +164,24 @@ public class CursorLayout extends FrameLayout {
      * so the scroll stays continuous and under the remote's control.
      */
     private void dragBy(float dx, float dy) {
-        float w = getWidth(), h = getHeight(), m = h * 0.12f;
         long now = SystemClock.uptimeMillis();
         if (!dragging) {
             dragging = true;
             dragDownTime = now;
-            fingerX = dx == 0 ? Math.max(m, Math.min(w - m, x)) : (dx > 0 ? w - m : m);
-            fingerY = dy == 0 ? Math.max(m, Math.min(h - m, y)) : (dy > 0 ? h - m : m);
+            dragBounds(dy);
+            float mx = (dragR - dragL) * 0.12f, my = (dragB - dragT) * 0.12f;
+            fingerX = dx == 0 ? Math.max(dragL + mx, Math.min(dragR - mx, x)) : (dx > 0 ? dragR - mx : dragL + mx);
+            fingerY = dy == 0 ? Math.max(dragT + my, Math.min(dragB - my, y)) : strokeStartY;
             send(MotionEvent.ACTION_DOWN, now);
         }
+        float mx = (dragR - dragL) * 0.12f, my = (dragB - dragT) * 0.12f;
         float nx = fingerX - dx, ny = fingerY - dy;
-        if (nx < m || nx > w - m || ny < m || ny > h - m) {
+        if (nx < dragL + mx || nx > dragR - mx || ny < dragT + my || ny > dragB - my) {
             // Out of room: lift here, then put the finger back at the start of its run.
             send(MotionEvent.ACTION_UP, now);
             dragDownTime = now;
-            fingerX = dx == 0 ? fingerX : (dx > 0 ? w - m : m);
-            fingerY = dy == 0 ? fingerY : (dy > 0 ? h - m : m);
+            fingerX = dx == 0 ? fingerX : (dx > 0 ? dragR - mx : dragL + mx);
+            fingerY = dy == 0 ? fingerY : strokeStartY;
             send(MotionEvent.ACTION_DOWN, now);
             nx = fingerX - dx;
             ny = fingerY - dy;
@@ -177,6 +189,26 @@ public class CursorLayout extends FrameLayout {
         fingerX = nx;
         fingerY = ny;
         send(MotionEvent.ACTION_MOVE, now);
+    }
+
+    /**
+     * Vertical drags go inside the scrollable box in the pointer's column when it can still scroll
+     * that way: pushing into the top edge from an episode list on the right used to put the finger
+     * on the site's header (above the list), so the list scrolled down but never back up.
+     */
+    private void dragBounds(float dy) {
+        android.graphics.RectF a = dy == 0 || listener == null ? null : listener.scrollArea(x, dy > 0 ? 1 : -1);
+        float minSide = 60 * getResources().getDisplayMetrics().density;
+        if (Debug.ON) android.util.Log.d("ClearScroll", "drag dy=" + dy + " at x=" + x + " area=" + a);
+        if (a != null && a.height() >= minSide && a.width() >= minSide) {
+            dragL = a.left; dragT = a.top; dragR = a.right; dragB = a.bottom;
+        } else {
+            dragL = 0; dragT = 0; dragR = getWidth(); dragB = getHeight();
+        }
+        // Strokes start near the middle (of the box, or of the screen in the pointer's column), where
+        // the content is: the top of a box or of the screen is usually a header laid over it, and a
+        // finger put down there drags the header (lists then scrolled down but never back up).
+        strokeStartY = dragT + (dragB - dragT) * (dy > 0 ? 0.62f : 0.38f);
     }
 
     /** Lift the virtual finger without a fling: hold still for a moment first, so the velocity is zero. */
@@ -193,12 +225,13 @@ public class CursorLayout extends FrameLayout {
     /** A quick swipe (Channel up/down): content moves by about {@code fraction} of the screen, with a fling. */
     void swipe(float fraction) {
         if (dragging) return;
-        float h = getHeight(), m = h * 0.12f;
-        float dist = fraction * h, step = dist / 6f;
+        dragBounds(fraction);
+        float h = dragB - dragT, m = h * 0.12f;
+        float dist = fraction * getHeight(), step = dist / 6f;
         long t0 = SystemClock.uptimeMillis();
         dragDownTime = t0;
-        fingerX = getWidth() / 2f;
-        fingerY = fraction > 0 ? h - m : m;
+        fingerX = dragR - dragL < getWidth() ? (dragL + dragR) / 2f : getWidth() / 2f;
+        fingerY = strokeStartY;
         send(MotionEvent.ACTION_DOWN, t0);
         for (int i = 1; i <= 6; i++) {
             final int k = i;

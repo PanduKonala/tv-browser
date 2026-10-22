@@ -327,6 +327,16 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                     renderHome();
                 });
             }
+            @Override public void scroller(String json) {
+                if (Debug.ON) Log.d("ClearScroll", "box " + json);
+                try {
+                    if (json == null || json.isEmpty()) { scroller = null; return; }
+                    JSONObject o = new JSONObject(json);
+                    scroller = new float[]{(float) o.getDouble("l"), (float) o.getDouble("t"), (float) o.getDouble("r"), (float) o.getDouble("b")};
+                    scrollerUp = o.optBoolean("up");
+                    scrollerDown = o.optBoolean("down");
+                } catch (JSONException e) { scroller = null; }
+            }
             @Override public void prefetch(String url) {
                 ui.post(() -> {
                     // Only links within the site being shown: a page can't use us to fetch elsewhere.
@@ -1042,6 +1052,19 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
     @Override
     public boolean canScroll() {
         return customView == null;
+    }
+
+    /** The page's last report of the scrollable box under the pointer (fractions of the page view). */
+    private volatile float[] scroller;
+    private volatile boolean scrollerUp, scrollerDown;
+
+    @Override
+    public android.graphics.RectF scrollArea(float x, int dirY) {
+        float[] a = scroller;
+        if (a == null || web == null || (dirY < 0 ? !scrollerUp : !scrollerDown)) return null;
+        float w = web.getWidth(), h = web.getHeight(), ox = web.getLeft(), oy = web.getTop();
+        android.graphics.RectF r = new android.graphics.RectF(ox + a[0] * w, oy + a[1] * h, ox + a[2] * w, oy + a[3] * h);
+        return x >= r.left && x <= r.right ? r : null; // only from that box's column
     }
 
     /** Channel up/down: a quick swipe of about {@code fdy} screens (negative scrolls up). */
