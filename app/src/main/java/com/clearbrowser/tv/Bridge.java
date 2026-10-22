@@ -23,6 +23,8 @@ final class Bridge {
         void removeBookmark(String url);
         /** From the home page only. */
         void clearRecent();
+        /** From the home page only: one entry of Recently visited. */
+        void removeRecent(String url);
         /** The pointer rests on a link in the top page. */
         void prefetch(String url);
     }
@@ -65,6 +67,11 @@ final class Bridge {
     @JavascriptInterface
     public void removeBookmark(String url) {
         host.removeBookmark(url);
+    }
+
+    @JavascriptInterface
+    public void removeRecent(String url) {
+        host.removeRecent(url);
     }
 
     @JavascriptInterface

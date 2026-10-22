@@ -312,6 +312,14 @@ public class MainActivity extends Activity implements CursorLayout.Listener {
                     notice("Bookmark removed");
                 });
             }
+            @Override public void removeRecent(String url) {
+                ui.post(() -> {
+                    // Any page can call the bridge, so only honour this from our own home page.
+                    if (!Prefs.isHome(web.getUrl()) || url == null) return;
+                    prefs.removeRecent(url);
+                    renderHome();
+                });
+            }
             @Override public void clearRecent() {
                 ui.post(() -> {
                     if (!Prefs.isHome(web.getUrl())) return;

@@ -65,6 +65,12 @@
   .card { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 14px; background: var(--card);
     border: 2px solid transparent; color: var(--text); text-decoration: none; min-width: 0; }
   .card:hover { border-color: var(--accent); background: var(--card-hi); }
+  .card { position: relative; }
+  .card .x { position: absolute; top: 50%; right: 10px; margin-top: -14px; width: 28px; height: 28px; border-radius: 14px;
+    border: 0; padding: 0; background: rgba(0,0,0,.35); color: var(--dim); font-size: 18px; line-height: 28px;
+    opacity: 0; transition: opacity .12s; }
+  .card:hover .x { opacity: 1; }
+  .card .x:hover { background: var(--danger); color: #fff; }
   .card .icon { width: 40px; height: 40px; border-radius: 11px; font-size: 18px; }
   .card .icon img { width: 28px; height: 28px; }
   .card .m { min-width: 0; }
@@ -165,7 +171,9 @@
       data.recent.forEach(function (r) {
         var a = el('a', 'card'); if (web(r.u)) a.href = r.u;
         var m = el('div', 'm'); m.appendChild(el('b', '', r.t)); m.appendChild(el('span', '', host(r.u)));
-        a.appendChild(icon(r)); a.appendChild(m); row.appendChild(a);
+        var x = el('button', 'x', '×'); x.title = 'Remove from history';
+        x.onclick = function (e) { e.preventDefault(); e.stopPropagation(); ClearBridge.removeRecent(r.u); };
+        a.appendChild(icon(r)); a.appendChild(m); a.appendChild(x); row.appendChild(a);
       });
     } else {
       row.innerHTML = '<div class="empty">Sites you open show up here.</div>';

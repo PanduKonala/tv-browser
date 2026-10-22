@@ -129,6 +129,26 @@ final class Prefs {
 
     void clearRecents() { sp.edit().remove("recent").apply(); }
 
+    /** Drops one entry from Recently visited, and the site's saved icon if nothing else of it is kept. */
+    void removeRecent(String url) {
+        JSONArray old = recents(), next = new JSONArray();
+        for (int i = 0; i < old.length(); i++) {
+            JSONObject o = old.optJSONObject(i);
+            if (o != null && !url.equals(o.optString("u"))) next.put(o);
+        }
+        sp.edit().putString("recent", next.toString()).apply();
+        String host = android.net.Uri.parse(url).getHost();
+        if (host == null) return;
+        JSONArray marks = bookmarks();
+        for (JSONArray list : new JSONArray[]{next, marks}) {
+            for (int i = 0; i < list.length(); i++) {
+                JSONObject o = list.optJSONObject(i);
+                if (o != null && host.equals(android.net.Uri.parse(o.optString("u")).getHost())) return;
+            }
+        }
+        icons.edit().remove(host).apply();
+    }
+
     String icon(String host) { return host == null ? null : icons.getString(host, null); }
 
     void putIcon(String host, String dataUri) {
