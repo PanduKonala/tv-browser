@@ -27,10 +27,23 @@
 
   // Remote media keys: act on this frame's playing (or first) video/audio, then pass the command
   // down to child frames, since most players sit in an iframe the app can't script directly.
+  // With nothing playing, play/toggle go to the page's main video: the largest one on screen, never a
+  // small muted preview (desktop pages put a hover-preview <video> before the real player).
+  function mainVideo(all) {
+    var best = null, bestArea = 0;
+    for (var i = 0; i < all.length; i++) {
+      var r = all[i].getBoundingClientRect(), area = Math.max(0, r.width) * Math.max(0, r.height);
+      var preview = all[i].muted && area < innerWidth * innerHeight * 0.15;
+      if (all[i].tagName === 'VIDEO' && !preview && area > bestArea) { best = all[i]; bestArea = area; }
+    }
+    if (best) return best;
+    for (var j = 0; j < all.length; j++) if (all[j].tagName === 'AUDIO') return all[j];
+    return null;
+  }
   function media(cmd) {
     var all = document.querySelectorAll('video,audio'), v = null;
     for (var i = 0; i < all.length; i++) if (!all[i].paused) { v = all[i]; break; }
-    if (!v) v = all[0];
+    if (!v) v = mainVideo(all);
     if (v) {
       if (cmd && cmd.seek !== undefined) { v.currentTime = cmd.seek; v.pause(); }
       // The remote's play key is the user pressing play (see the autoplay hold below).
